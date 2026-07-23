@@ -26,9 +26,18 @@ object KatanaSysEx {
 
     const val SYSEX_START = 0xF0
     const val SYSEX_END = 0xF7
+    const val ROLAND_ID = 0x41
 
-    /** F0 41 00 00 00 00 33 — everything up to and including the model id. */
-    val HEADER = intArrayOf(0xF0, 0x41, 0x00, 0x00, 0x00, 0x00, 0x33)
+    /**
+     * Katana model id byte. Gen1/MkII use 0x33 (confirmed by the community
+     * maps). Gen 3 may use a different id — this is a "device profile" knob so
+     * the same code can target either. It can be updated at runtime from an
+     * Identity Reply (see [identityRequest] / [parseIdentityReply]).
+     */
+    @Volatile var modelId: Int = 0x33
+
+    /** F0 41 00 00 00 00 <model> — everything up to and including the model id. */
+    fun header(): IntArray = intArrayOf(0xF0, ROLAND_ID, 0x00, 0x00, 0x00, 0x00, modelId)
 
     const val CMD_DT1 = 0x12 // "Data Set 1"  — write parameter(s)
     const val CMD_RQ1 = 0x11 // "Request 1"   — read parameter(s)
@@ -73,8 +82,48 @@ object KatanaSysEx {
 
     private fun frame(cmd: Int, body: IntArray): ByteArray {
         val sum = checksum(body)
-        val ints = HEADER + intArrayOf(cmd) + body + intArrayOf(sum, SYSEX_END)
+        val ints = header() + intArrayOf(cmd) + body + intArrayOf(sum, SYSEX_END)
         return ByteArray(ints.size) { (ints[it] and 0xFF).toByte() }
+    }
+
+    // --- Handshake / editor mode ---------------------------------------------
+
+    /** DT1 write to the editor-mode address (7F 00 00 01). */
+    val EDIT_MODE_ADDR = intArrayOf(0x7F, 0x00, 0x00, 0x01)
+
+    fun editorMode(on: Boolean): ByteArray = buildSet(EDIT_MODE_ADDR, if (on) 1 else 0)
+
+    /**
+     * Universal MIDI Identity Request. The amp replies with an Identity Reply
+     * whose Roland family/model bytes we use to auto-select the device profile
+     * (Gen1/MkII vs Gen 3). See [parseIdentityReply].
+     */
+    fun identityRequest(): ByteArray =
+        byteArrayOf(0xF0.toByte(), 0x7E, 0x7F, 0x06, 0x01, 0xF7.toByte())
+
+    /**
+     * The "controller announce" handshake that Boss Tone Studio / the MS3
+     * controllers send right after enumeration (an identity-reply-shaped frame).
+     * Sending it — twice, since the first is often dropped — before the
+     * editor-mode write makes the amp start streaming.
+     */
+    fun announceHandshake(): ByteArray = byteArrayOf(
+        0xF0.toByte(), 0x7E, 0x00, 0x06, 0x02, 0x41, 0x33,
+        0x03, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0xF7.toByte(),
+    )
+
+    /**
+     * If [raw] is a Universal Identity Reply (F0 7E <dev> 06 02 <manufacturer>
+     * ...), return the manufacturer + family/model bytes for logging/profile
+     * selection. Returns null otherwise.
+     */
+    fun parseIdentityReply(raw: ByteArray): IntArray? {
+        val b = IntArray(raw.size) { raw[it].toInt() and 0xFF }
+        if (b.size < 6) return null
+        if (b[0] != 0xF0 || b[1] != 0x7E) return null
+        // b[2] = device id, then 06 02 = identity reply
+        if (b.getOrNull(3) != 0x06 || b.getOrNull(4) != 0x02) return null
+        return b.copyOfRange(5, b.size - 1) // manufacturer + family/model/version
     }
 
     /** A parsed inbound DT1 message: the amp reporting data at [address]. */
@@ -92,13 +141,16 @@ object KatanaSysEx {
      * well-formed Katana DT1 message. The checksum is validated.
      */
     fun parse(raw: ByteArray): Incoming? {
+        val hdr = header()
         val b = IntArray(raw.size) { raw[it].toInt() and 0xFF }
-        if (b.size < HEADER.size + 1 + 4 + 1 + 1) return null
+        if (b.size < hdr.size + 1 + 4 + 1 + 1) return null
         if (b.first() != SYSEX_START || b.last() != SYSEX_END) return null
-        for (i in HEADER.indices) if (b[i] != HEADER[i]) return null
-        if (b[HEADER.size] != CMD_DT1) return null
+        // Match the Roland/Katana prefix but tolerate a different model-id byte
+        // (Gen 3), so we still parse replies while auto-detecting the profile.
+        for (i in 0 until hdr.size - 1) if (b[i] != hdr[i]) return null
+        if (b[hdr.size] != CMD_DT1) return null
 
-        val addrStart = HEADER.size + 1
+        val addrStart = hdr.size + 1
         val address = b.copyOfRange(addrStart, addrStart + 4)
         // data runs from after the address up to (but not including) checksum+F7
         val data = b.copyOfRange(addrStart + 4, b.size - 2)

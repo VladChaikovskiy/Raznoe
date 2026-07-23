@@ -3,9 +3,10 @@ package com.raznoe.katana.ui
 import android.hardware.usb.UsbDevice
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +52,7 @@ import com.raznoe.katana.protocol.ParamKind
 @Composable
 fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Управление", "Консоль", "Библиотека")
+    val tabs = listOf("Усилитель", "Эффекты", "Библиотека", "Консоль")
 
     Scaffold(
         topBar = {
@@ -74,9 +77,10 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
                 }
             }
             when (tab) {
-                0 -> ControlTab(vm)
-                1 -> ConsoleTab(vm)
-                else -> LibraryTab(vm)
+                0 -> AmpTab(vm)
+                1 -> EffectsTab(vm)
+                2 -> LibraryTab(vm)
+                else -> ConsoleTab(vm)
             }
         }
     }
@@ -88,20 +92,25 @@ private fun ConnectionBar(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> 
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (vm.connected) {
                 Text("● ${vm.connectedLabel}", color = MaterialTheme.colorScheme.primary)
+                if (vm.identityInfo.isNotEmpty()) {
+                    Text(
+                        "ID: ${vm.identityInfo}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { vm.readCurrentState() }) { Text("Прочитать состояние") }
+                    OutlinedButton(onClick = { vm.readCurrentState() }) { Text("Прочитать") }
                     Button(onClick = { vm.disconnect() }) { Text("Отключить") }
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { vm.refreshDevices() }) { Text("Обновить список") }
-                }
-                if (vm.devices.isEmpty()) {
-                    Text(
-                        "Подключи Katana к телефону кабелем USB-C и разреши доступ.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                OutlinedButton(onClick = { vm.refreshDevices() }) { Text("Обновить список") }
+                Text(
+                    "Важно: включай комбик, удерживая кнопку [BOOSTER], — так активируется " +
+                        "режим USB-MIDI. Затем подключи кабель USB-C.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
                 vm.devices.forEach { d: DeviceInfo ->
                     Row(
                         Modifier.fillMaxWidth(),
@@ -124,70 +133,118 @@ private fun ConnectionBar(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ControlTab(vm: KatanaViewModel) {
+private fun AmpTab(vm: KatanaViewModel) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Channel / preset selection via Program Change
-        SectionCard("Каналы / пресеты (Program Change)") {
-            Text(
-                "Кнопки шлют Program Change. Если Gen 3 использует другую нумерацию — " +
-                    "поправишь в одном месте.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+        SectionCard("Каналы") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                (1..8).forEach { n ->
-                    OutlinedButton(onClick = { vm.selectProgram(n - 1) }) { Text("$n") }
+                KatanaParams.CHANNELS.forEachIndexed { i, (name, _) ->
+                    FilterChip(
+                        selected = vm.currentChannel == i,
+                        onClick = { vm.selectChannel(i) },
+                        label = { Text(name) },
+                    )
                 }
             }
         }
 
-        KatanaParams.BY_CATEGORY.forEach { (category, params) ->
-            SectionCard(category) {
+        KatanaParams.BY_CATEGORY[KatanaParams.AMP_SECTION]?.let { params ->
+            SectionCard(KatanaParams.AMP_SECTION) {
                 params.forEach { p -> ParamControl(vm, p) }
             }
         }
 
-        Text(
-            "⚠️ Адреса параметров (кроме Reverb type) — предварительные, из карты Gen2. " +
-                "Проверяй на своём Gen 3 через вкладку «Консоль».",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.secondary,
-        )
+        ProfileBanner()
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EffectsTab(vm: KatanaViewModel) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        KatanaParams.EFFECT_SECTIONS.forEach { section ->
+            val params = KatanaParams.BY_CATEGORY[section] ?: return@forEach
+            SectionCard(section) {
+                params.forEach { p -> ParamControl(vm, p) }
+                if (section == "Mod" || section == "FX") {
+                    Text(
+                        "Параметры конкретного типа эффекта редактируются через вкладку " +
+                            "«Консоль» (полная карта под-параметров ещё уточняется).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+            }
+        }
+        ProfileBanner()
+    }
+}
+
+@Composable
+private fun ProfileBanner() {
+    Text(
+        "Профиль адресов: Katana MkII (model 0x33). Для Gen 3 часть адресов может " +
+            "отличаться — параметры с «(?)» не подтверждены. Проверяй и уточняй через " +
+            "вкладку «Консоль» (чтение блока + сравнение).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.secondary,
+    )
+}
+
 @Composable
 private fun ParamControl(vm: KatanaViewModel, p: KatanaParam) {
     val value = vm.paramValues[p.id] ?: p.default
-    Column(Modifier.padding(vertical = 4.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
+    val mark = if (!p.verified) "  (?)" else ""
+    when (p.kind) {
+        ParamKind.TOGGLE -> Row(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(p.label + if (!p.verified) "  (?)" else "")
-            if (p.kind == ParamKind.CONTINUOUS) Text("$value")
+            Text(p.label + mark)
+            Switch(checked = value != 0, onCheckedChange = { vm.setParam(p, if (it) 1 else 0) })
         }
-        when (p.kind) {
-            ParamKind.CONTINUOUS -> Slider(
+
+        ParamKind.ENUM -> Row(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(p.label + mark)
+            EnumDropdown(p, value) { idx -> vm.setParam(p, p.valueOfIndex(idx)) }
+        }
+
+        ParamKind.CONTINUOUS -> Column(Modifier.padding(vertical = 4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(p.label + mark)
+                Text("$value")
+            }
+            Slider(
                 value = value.toFloat(),
                 onValueChange = { vm.setParam(p, it.toInt()) },
                 valueRange = p.min.toFloat()..p.max.toFloat(),
             )
-            ParamKind.TOGGLE -> Switch(
-                checked = value != 0,
-                onCheckedChange = { vm.setParam(p, if (it) 1 else 0) },
-            )
-            ParamKind.ENUM -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                p.options.forEachIndexed { i, name ->
-                    FilterChip(
-                        selected = value == i,
-                        onClick = { vm.setParam(p, i) },
-                        label = { Text(name) },
-                    )
-                }
+        }
+    }
+}
+
+@Composable
+private fun EnumDropdown(p: KatanaParam, value: Int, onSelect: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val index = p.indexOfValue(value)
+    val current = p.options.getOrElse(index) { "?" }
+    Box {
+        OutlinedButton(onClick = { open = true }) { Text(current) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            p.options.forEachIndexed { i, label ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { open = false; onSelect(i) },
+                )
             }
         }
     }
@@ -195,9 +252,9 @@ private fun ParamControl(vm: KatanaViewModel, p: KatanaParam) {
 
 @Composable
 private fun ConsoleTab(vm: KatanaViewModel) {
-    var hex by remember { mutableStateOf("F0 41 00 00 00 00 33 11 60 00 00 00 00 00 00 10 10 F7") }
+    var hex by remember { mutableStateOf("F0 41 00 00 00 00 33 11 60 00 00 30 00 00 00 0A 06 F7") }
     var result by remember { mutableStateOf("") }
-    var addr by remember { mutableStateOf("60 00 00 00") }
+    var addr by remember { mutableStateOf("60 00 00 30") }
     var size by remember { mutableStateOf("16") }
 
     Column(
@@ -206,19 +263,17 @@ private fun ConsoleTab(vm: KatanaViewModel) {
     ) {
         SectionCard("Отправить сырой SysEx") {
             OutlinedTextField(
-                value = hex,
-                onValueChange = { hex = it },
-                label = { Text("hex-байты") },
-                modifier = Modifier.fillMaxWidth(),
+                value = hex, onValueChange = { hex = it },
+                label = { Text("hex-байты") }, modifier = Modifier.fillMaxWidth(),
             )
             Button(onClick = { result = vm.sendRawHex(hex) }) { Text("Отправить") }
             if (result.isNotEmpty()) Text(result, style = MaterialTheme.typography.bodySmall)
         }
 
-        SectionCard("Прочитать блок (для мэппинга Gen 3)") {
+        SectionCard("Прочитать блок (мэппинг Gen 3)") {
             Text(
-                "Считай блок, покрути ручку на комбике физически, считай снова и сравни — " +
-                    "так находятся адреса Gen 3.",
+                "Считай блок → покрути ручку на комбике физически → считай снова → сравни RX. " +
+                    "Изменившийся байт = адрес параметра.",
                 style = MaterialTheme.typography.bodySmall,
             )
             OutlinedTextField(
@@ -229,19 +284,15 @@ private fun ConsoleTab(vm: KatanaViewModel) {
                 value = size, onValueChange = { size = it },
                 label = { Text("сколько байт") }, modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = {
-                result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16)
-            }) { Text("Запросить") }
+            Button(onClick = { result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16) }) {
+                Text("Запросить")
+            }
         }
 
         SectionCard("Лог (TX/RX)") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.clearLog() }) { Text("Очистить") }
-            }
+            OutlinedButton(onClick = { vm.clearLog() }) { Text("Очистить") }
             Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
+                Modifier.fillMaxWidth().heightIn(max = 320.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
                 vm.log.takeLast(200).forEach { line ->
@@ -270,15 +321,13 @@ private fun LibraryTab(vm: KatanaViewModel) {
                 value = name, onValueChange = { name = it },
                 label = { Text("название пресета") }, modifier = Modifier.fillMaxWidth(),
             )
-            Button(
-                onClick = { if (name.isNotBlank()) { vm.capturePatch(name); name = "" } },
-            ) { Text("Сохранить") }
+            Button(onClick = { if (name.isNotBlank()) { vm.capturePatch(name); name = "" } }) {
+                Text("Сохранить")
+            }
         }
 
         SectionCard("Мои пресеты") {
-            if (vm.patches.isEmpty()) {
-                Text("Пока пусто.", style = MaterialTheme.typography.bodySmall)
-            }
+            if (vm.patches.isEmpty()) Text("Пока пусто.", style = MaterialTheme.typography.bodySmall)
             vm.patches.forEach { patch ->
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 2.dp),

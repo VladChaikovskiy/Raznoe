@@ -17,6 +17,7 @@ import com.raznoe.katana.model.PatchStore
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.KatanaSysEx
+import com.raznoe.katana.protocol.ParamKind
 import com.raznoe.katana.usb.KatanaController
 import com.raznoe.katana.usb.UsbMidiConnection
 
@@ -35,11 +36,15 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     private var controller: KatanaController? = null
 
     // --- UI state ---------------------------------------------------------
-    var status by mutableStateOf("Not connected")
+    var status by mutableStateOf("Не подключено")
         private set
     var connected by mutableStateOf(false)
         private set
     var connectedLabel by mutableStateOf("")
+        private set
+    var identityInfo by mutableStateOf("")
+        private set
+    var currentChannel by mutableStateOf(0)
         private set
 
     val devices = mutableStateListOf<DeviceInfo>()
@@ -48,7 +53,6 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     val patches = mutableStateListOf<Patch>()
 
     init {
-        // seed defaults so sliders have a position before the amp reports back
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
         refreshDevices()
         refreshPatches()
@@ -68,7 +72,9 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                     ),
                 )
             }
-        if (devices.isEmpty()) status = "No Roland/BOSS device found. Plug in the Katana."
+        if (devices.isEmpty()) {
+            status = "Устройство Roland не найдено. Включи комбик, удерживая [BOOSTER], и подключи кабель."
+        }
     }
 
     fun hasPermission(device: UsbDevice): Boolean = usbManager.hasPermission(device)
@@ -79,10 +85,17 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val ctl = KatanaController(conn)
         ctl.onTraffic = { dir, sysex -> appendLog("$dir  ${KatanaSysEx.toHex(sysex)}") }
         ctl.onIncoming = { incoming -> onMain { applyIncoming(incoming) } }
+        ctl.onIdentity = { bytes ->
+            val hex = bytes.joinToString(" ") { "%02X".format(it) }
+            onMain {
+                identityInfo = hex
+                appendLog("IDENTITY  $hex")
+            }
+        }
 
         val error = conn.open(onSysEx = { sysex -> ctl.handleInbound(sysex) })
         if (error != null) {
-            status = "Connect failed: $error"
+            status = "Не удалось подключиться: $error"
             connected = false
             return
         }
@@ -90,64 +103,82 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         controller = ctl
         connected = true
         connectedLabel = device.productName ?: "BOSS Katana"
-        status = "Connected to $connectedLabel"
-        appendLog("— connected, requesting current state —")
-        ctl.readTempPatch()
+        status = "Подключено: $connectedLabel"
+        appendLog("— подключено, рукопожатие + чтение состояния —")
+        ctl.begin()
     }
 
     fun disconnect() {
+        controller?.shutdown()
         controller = null
         connection?.close()
         connection = null
-        if (connected) appendLog("— disconnected —")
+        if (connected) appendLog("— отключено —")
         connected = false
         connectedLabel = ""
-        status = "Not connected"
+        status = "Не подключено"
     }
 
     // --- Controls ---------------------------------------------------------
     fun setParam(param: KatanaParam, value: Int) {
-        paramValues[param.id] = value.coerceIn(param.min, param.max)
-        controller?.setParam(param, value)
+        val stored = if (param.kind == ParamKind.ENUM) value else value.coerceIn(param.min, param.max)
+        paramValues[param.id] = stored
+        controller?.setParam(param, stored)
     }
 
-    fun selectProgram(program: Int) {
-        controller?.selectProgram(program)
+    fun selectChannel(index: Int) {
+        val (_, dataByte) = KatanaParams.CHANNELS.getOrElse(index) { return }
+        currentChannel = index
+        controller?.selectChannel(dataByte)
     }
 
     fun readCurrentState() {
-        controller?.readTempPatch()
+        controller?.readAll()
     }
 
-    /** Send a raw SysEx typed as hex in the console. */
     fun sendRawHex(hex: String): String {
-        val ctl = controller ?: return "Not connected"
+        val ctl = controller ?: return "Не подключено"
         return try {
             val bytes = KatanaSysEx.fromHex(hex)
-            if (bytes.isEmpty()) return "Nothing to send"
+            if (bytes.isEmpty()) return "Нечего отправлять"
             ctl.sendSysEx(bytes)
-            "Sent ${bytes.size} bytes"
+            "Отправлено ${bytes.size} байт"
         } catch (e: Exception) {
-            "Bad hex: ${e.message}"
+            "Ошибка hex: ${e.message}"
         }
     }
 
     fun readBlockHex(addressHex: String, size: Int): String {
-        val ctl = controller ?: return "Not connected"
+        val ctl = controller ?: return "Не подключено"
         return try {
             val addr = KatanaSysEx.fromHex(addressHex).map { it.toInt() and 0xFF }.toIntArray()
-            if (addr.size != 4) return "Address must be 4 bytes"
+            if (addr.size != 4) return "Адрес должен быть из 4 байт"
             ctl.readBlock(addr, size)
-            "Requested $size bytes"
+            "Запрошено $size байт"
         } catch (e: Exception) {
-            "Bad address: ${e.message}"
+            "Ошибка адреса: ${e.message}"
         }
     }
 
+    /**
+     * Fold an inbound DT1 (which may be a whole block from an RQ1 read or a
+     * single-parameter knob echo) back onto our parameter values. For each
+     * param whose address falls inside the reported block, pull its byte(s).
+     */
     private fun applyIncoming(incoming: KatanaSysEx.Incoming) {
-        // Map a reported single-byte value back onto a known parameter.
-        KatanaParams.ALL.firstOrNull { it.address.contentEquals(incoming.address) }?.let { p ->
-            if (incoming.data.isNotEmpty()) paramValues[p.id] = incoming.data[0] and 0x7F
+        val addr = incoming.address
+        val data = incoming.data
+        if (data.isEmpty()) return
+        for (p in KatanaParams.ALL) {
+            if (p.address[0] != addr[0] || p.address[1] != addr[1] || p.address[2] != addr[2]) continue
+            val offset = p.address[3] - addr[3]
+            if (offset < 0 || offset >= data.size) continue
+            val value = if (p.word && offset + 1 < data.size) {
+                ((data[offset] and 0x7F) shl 7) or (data[offset + 1] and 0x7F)
+            } else {
+                data[offset] and 0x7F
+            }
+            paramValues[p.id] = value
         }
     }
 
@@ -167,7 +198,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         patch.values.forEach { (id, value) ->
             KatanaParams.BY_ID[id]?.let { setParam(it, value) }
         }
-        appendLog("— applied patch '${patch.name}' —")
+        appendLog("— применён пресет '${patch.name}' —")
     }
 
     fun deletePatch(name: String) {
