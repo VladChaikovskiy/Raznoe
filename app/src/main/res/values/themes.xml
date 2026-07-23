@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose supplies the real Material3 theming at runtime; this XML theme
+        only needs to be a valid no-action-bar base so the Activity can start.
+        Using the platform Material theme avoids pulling in the extra
+        com.google.android.material dependency.
+    -->
+    <style name="Theme.KatanaController" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    </style>
+</resources>

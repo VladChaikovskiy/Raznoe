@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Roland Corporation USB vendor id = 0x0582 (1410 decimal).
+        Product id is intentionally omitted so every Roland/BOSS device is
+        matched (Katana Gen1/Gen2/Gen3 use different product ids). The app
+        shows the detected vendor/product id in the connection log so unknown
+        Gen 3 ids can be confirmed.
+    -->
+    <usb-device vendor-id="1410" />
+</resources>
