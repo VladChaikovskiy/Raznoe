@@ -2,10 +2,14 @@ package com.raznoe.katana
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -14,6 +18,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import com.raznoe.katana.model.Patch
 import com.raznoe.katana.model.PatchStore
+import com.raznoe.katana.model.Track
+import com.raznoe.katana.model.TrackStore
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.KatanaSysEx
@@ -28,8 +34,10 @@ data class DeviceInfo(val device: UsbDevice, val label: String)
 
 class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
+    private val app = app
     private val usbManager = app.getSystemService(Context.USB_SERVICE) as UsbManager
     private val patchStore = PatchStore(app)
+    private val trackStore = TrackStore(app)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var connection: UsbMidiConnection? = null
@@ -52,10 +60,27 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     val log = mutableStateListOf<String>()
     val patches = mutableStateListOf<Patch>()
 
+    // --- Jam player state -------------------------------------------------
+    val tracks = mutableStateListOf<Track>()
+    var currentTrack by mutableStateOf<Int?>(null)
+        private set
+    var isPlaying by mutableStateOf(false)
+        private set
+    var positionMs by mutableStateOf(0)
+        private set
+    var durationMs by mutableStateOf(0)
+        private set
+    var looping by mutableStateOf(false)
+        private set
+    var speed by mutableStateOf(1.0f)
+        private set
+    private var player: MediaPlayer? = null
+
     init {
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
         refreshDevices()
         refreshPatches()
+        tracks.addAll(trackStore.list())
     }
 
     // --- Device discovery / connection -----------------------------------
@@ -206,6 +231,97 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         refreshPatches()
     }
 
+    // --- Jam player (MP3 backing tracks) ---------------------------------
+    fun addTrack(uri: Uri) {
+        runCatching {
+            app.contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "track"
+        if (tracks.none { it.uri == uri.toString() }) {
+            tracks.add(Track(uri.toString(), name))
+            trackStore.saveAll(tracks.toList())
+        }
+    }
+
+    fun removeTrack(index: Int) {
+        if (index !in tracks.indices) return
+        if (currentTrack == index) stopPlayback()
+        tracks.removeAt(index)
+        trackStore.saveAll(tracks.toList())
+        if (currentTrack != null && currentTrack!! >= tracks.size) currentTrack = null
+    }
+
+    fun playTrack(index: Int) {
+        if (index !in tracks.indices) return
+        releasePlayer()
+        val t = tracks[index]
+        player = MediaPlayer().apply {
+            setOnPreparedListener { mp ->
+                durationMs = mp.duration
+                applySpeed(mp)
+                mp.isLooping = looping
+                mp.start()
+                isPlaying = true
+            }
+            setOnCompletionListener {
+                if (!looping) { isPlaying = false; positionMs = durationMs }
+            }
+            setOnErrorListener { _, _, _ -> isPlaying = false; true }
+            runCatching {
+                setDataSource(app, Uri.parse(t.uri))
+                prepareAsync()
+            }.onFailure { isPlaying = false }
+        }
+        currentTrack = index
+        positionMs = 0
+    }
+
+    fun togglePlayPause() {
+        val mp = player
+        if (mp == null) { currentTrack?.let { playTrack(it) } ?: tracks.indices.firstOrNull()?.let { playTrack(it) }; return }
+        if (mp.isPlaying) { mp.pause(); isPlaying = false } else { mp.start(); isPlaying = true }
+    }
+
+    fun stopPlayback() {
+        releasePlayer(); isPlaying = false; positionMs = 0
+    }
+
+    fun seekTo(ms: Int) {
+        player?.seekTo(ms.coerceIn(0, durationMs)); positionMs = ms
+    }
+
+    fun toggleLoop() {
+        looping = !looping; player?.isLooping = looping
+    }
+
+    fun cycleSpeed() {
+        speed = when (speed) { 1.0f -> 0.75f; 0.75f -> 0.5f; 0.5f -> 1.25f; else -> 1.0f }
+        val mp = player ?: return
+        if (mp.isPlaying) applySpeed(mp)
+    }
+
+    /** Called from the UI to refresh the seek position while playing. */
+    fun refreshPosition() {
+        player?.let { if (it.isPlaying) positionMs = it.currentPosition }
+    }
+
+    private fun applySpeed(mp: MediaPlayer) {
+        runCatching { mp.playbackParams = mp.playbackParams.setSpeed(speed) }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? =
+        runCatching {
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+
+    private fun releasePlayer() {
+        runCatching { player?.release() }
+        player = null
+    }
+
     // --- Log --------------------------------------------------------------
     fun clearLog() = log.clear()
 
@@ -220,6 +336,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        releasePlayer()
         disconnect()
         super.onCleared()
     }

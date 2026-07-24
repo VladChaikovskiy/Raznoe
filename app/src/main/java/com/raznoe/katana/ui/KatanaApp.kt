@@ -1,6 +1,8 @@
 package com.raznoe.katana.ui
 
 import android.hardware.usb.UsbDevice
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,8 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +46,7 @@ import com.raznoe.katana.model.Patch
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.ParamKind
+import kotlinx.coroutines.delay
 
 private data class Block(val key: String, val short: String, val color: Color, val swId: String?)
 
@@ -63,7 +68,8 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
             when (screen) {
                 0 -> PatchScreen(vm, onConnectRequest)
                 1 -> PresetsScreen(vm)
-                2 -> LibraryScreen(vm)
+                2 -> JamScreen(vm)
+                3 -> LibraryScreen(vm)
                 else -> ConsoleScreen(vm)
             }
         }
@@ -73,17 +79,17 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("Патч", "Пресеты", "Библиотека", "Консоль")
+    val items = listOf("Патч", "Пресеты", "Джем", "Библиотека", "Консоль")
     Row(
-        Modifier.fillMaxWidth().background(Nux.Panel).padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().background(Nux.Panel).padding(vertical = 10.dp, horizontal = 4.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         items.forEachIndexed { i, label ->
             val c = if (i == selected) Nux.Orange else Nux.TextLo
             Text(
-                label, color = c,
+                label, color = c, fontSize = 12.sp,
                 fontWeight = if (i == selected) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.clickable { onSelect(i) }.padding(horizontal = 6.dp),
+                modifier = Modifier.clickable { onSelect(i) }.padding(horizontal = 4.dp),
             )
         }
     }
@@ -272,6 +278,82 @@ private fun PresetsScreen(vm: KatanaViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun JamScreen(vm: KatanaViewModel) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.addTrack(it) }
+    }
+    LaunchedEffect(vm.isPlaying) {
+        while (vm.isPlaying) { vm.refreshPosition(); delay(400) }
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Text("Джем — минусовки", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+            "Треки играют через динамик/выход телефона — играй под них на гитаре через комбик.",
+            color = Nux.TextLo, fontSize = 12.sp,
+        )
+
+        Panel(accent = Nux.Orange) {
+            val idx = vm.currentTrack
+            val name = idx?.let { vm.tracks.getOrNull(it)?.name } ?: "Ничего не выбрано"
+            Text(name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            val dur = if (vm.durationMs > 0) vm.durationMs else 1
+            Slider(
+                value = vm.positionMs.coerceIn(0, dur).toFloat(),
+                onValueChange = { vm.seekTo(it.toInt()) },
+                valueRange = 0f..dur.toFloat(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(fmtTime(vm.positionMs), color = Nux.TextLo, fontSize = 12.sp)
+                Text(fmtTime(vm.durationMs), color = Nux.TextLo, fontSize = 12.sp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill(if (vm.isPlaying) "Пауза" else "Играть", selected = vm.isPlaying, accent = Nux.Orange) {
+                    vm.togglePlayPause()
+                }
+                Pill("Луп", selected = vm.looping, accent = Nux.Orange) { vm.toggleLoop() }
+                Pill("${vm.speed}x", selected = false, accent = Nux.Orange) { vm.cycleSpeed() }
+            }
+        }
+
+        Panel {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Мои треки", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+                Pill("Добавить MP3", selected = true, accent = Nux.Orange) {
+                    picker.launch(arrayOf("audio/*"))
+                }
+            }
+            if (vm.tracks.isEmpty()) Text("Пусто — добавь трек.", color = Nux.TextLo, fontSize = 12.sp)
+            vm.tracks.forEachIndexed { i, t ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        t.name,
+                        color = if (vm.currentTrack == i) Nux.Orange else Nux.TextHi,
+                        modifier = Modifier.weight(1f).clickable { vm.playTrack(i) },
+                        maxLines = 1,
+                    )
+                    Pill("▶", selected = false, accent = Nux.Orange) { vm.playTrack(i) }
+                    Box(Modifier.padding(start = 8.dp)) {
+                        Pill("✕", selected = false, accent = Nux.Amp) { vm.removeTrack(i) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun fmtTime(ms: Int): String {
+    val totalSec = ms / 1000
+    return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
 @Composable
