@@ -189,8 +189,11 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Experimental new-gen (Gen 3 / Katana:GO dialect) amp command from the console. */
-    fun sendNewGenAmp(knob: Int, value: Int) {
-        controller?.sendSysEx(KatanaSysEx.buildNewGenAmpSet(knob, value))
+    fun sendNewGenAmp(knob: Int, value: Int): String {
+        val ctl = controller ?: return "Не подключено"
+        val frame = KatanaSysEx.buildNewGenAmpSet(knob, value)
+        ctl.sendSysEx(frame)
+        return "→ ${KatanaSysEx.toHex(frame)}"
     }
 
     fun sendRawHex(hex: String): String {
