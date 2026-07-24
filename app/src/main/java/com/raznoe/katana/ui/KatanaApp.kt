@@ -1,6 +1,9 @@
 package com.raznoe.katana.ui
 
 import android.hardware.usb.UsbDevice
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,25 +15,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,91 +29,278 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.raznoe.katana.DeviceInfo
 import com.raznoe.katana.KatanaViewModel
+import com.raznoe.katana.model.FactoryPresets
+import com.raznoe.katana.model.Patch
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.ParamKind
 
-@OptIn(ExperimentalMaterial3Api::class)
+private data class Block(val key: String, val short: String, val color: Color, val swId: String?)
+
+private val CHAIN = listOf(
+    Block("Noise Suppressor", "GATE", Nux.Gate, "ns_sw"),
+    Block("Booster", "BST", Nux.Boost, "boost_sw"),
+    Block("Усилитель", "AMP", Nux.Amp, null),
+    Block("Mod", "MOD", Nux.Mod, "mod_sw"),
+    Block("FX", "FX", Nux.Fx, "fx_sw"),
+    Block("Delay", "DLY", Nux.Delay, "delay_sw"),
+    Block("Reverb", "RVB", Nux.Reverb, "reverb_sw"),
+)
+
 @Composable
 fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Усилитель", "Эффекты", "Библиотека", "Консоль")
+    var screen by remember { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxSize().background(Nux.Bg)) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (screen) {
+                0 -> PatchScreen(vm, onConnectRequest)
+                1 -> PresetsScreen(vm)
+                2 -> LibraryScreen(vm)
+                else -> ConsoleScreen(vm)
+            }
+        }
+        BottomNav(screen) { screen = it }
+    }
+}
 
-    Scaffold(
-        topBar = {
-            TopAppBar(title = {
-                Column {
-                    Text("Katana Ctl", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        vm.status,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            })
-        },
-    ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            ConnectionBar(vm, onConnectRequest)
-            TabRow(selectedTabIndex = tab) {
-                tabs.forEachIndexed { i, title ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+@Composable
+private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    val items = listOf("Патч", "Пресеты", "Библиотека", "Консоль")
+    Row(
+        Modifier.fillMaxWidth().background(Nux.Panel).padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        items.forEachIndexed { i, label ->
+            val c = if (i == selected) Nux.Orange else Nux.TextLo
+            Text(
+                label, color = c,
+                fontWeight = if (i == selected) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.clickable { onSelect(i) }.padding(horizontal = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeviceTitle() {
+    Text(
+        "K A T A N A",
+        color = Nux.TextLo,
+        fontWeight = FontWeight.Bold,
+        fontSize = 16.sp,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PatchScreen(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
+    var selectedBlock by remember { mutableIntStateOf(2) } // AMP
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        DeviceTitle()
+        ConnectionStrip(vm, onConnectRequest)
+
+        // Channels
+        Panel {
+            Text("Каналы", color = Nux.TextLo, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                KatanaParams.CHANNELS.forEachIndexed { i, (_, _) ->
+                    RoundButton(if (i == 0) "P" else "$i", vm.currentChannel == i) {
+                        vm.selectChannel(i)
+                    }
                 }
             }
-            when (tab) {
-                0 -> AmpTab(vm)
-                1 -> EffectsTab(vm)
-                2 -> LibraryTab(vm)
-                else -> ConsoleTab(vm)
+        }
+
+        // Signal chain
+        Panel {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CHAIN.forEachIndexed { i, b ->
+                    val on = b.swId?.let { (vm.paramValues[it] ?: 0) != 0 } ?: true
+                    ChainChip(b, selected = i == selectedBlock, on = on) { selectedBlock = i }
+                }
+            }
+        }
+
+        BlockEditor(vm, CHAIN[selectedBlock])
+
+        Text(
+            "Профиль адресов: Katana MkII. Для Gen 3 «(?)»-параметры не подтверждены — " +
+                "проверяй через вкладку «Консоль».",
+            color = Nux.TextLo, fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun ChainChip(b: Block, selected: Boolean, on: Boolean, onClick: () -> Unit) {
+    val border = if (selected) b.color else Nux.Stroke
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Nux.PanelHi)
+                .border(2.dp, border, RoundedCornerShape(12.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(b.short, color = if (on) b.color else Nux.TextLo, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        Box(
+            Modifier.padding(top = 4.dp).size(7.dp).clip(RoundedCornerShape(4.dp))
+                .background(if (on) b.color else Nux.Stroke),
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BlockEditor(vm: KatanaViewModel, block: Block) {
+    val params = KatanaParams.BY_CATEGORY[block.key].orEmpty()
+    Panel(accent = block.color) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(block.key.uppercase(), color = block.color, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            block.swId?.let { sw ->
+                val on = (vm.paramValues[sw] ?: 0) != 0
+                OnOffPills(on, block.color) { vm.setParam(KatanaParams.BY_ID[sw]!!, if (it) 1 else 0) }
+            }
+        }
+
+        // enums (type selectors) and secondary toggles
+        params.filter { it.id != block.swId }.forEach { p ->
+            when (p.kind) {
+                ParamKind.ENUM -> {
+                    val v = vm.paramValues[p.id] ?: p.default
+                    Text(p.label + mark(p), color = Nux.TextLo, fontSize = 13.sp)
+                    ChipRow(p.options, p.indexOfValue(v), block.color) { idx ->
+                        vm.setParam(p, p.valueOfIndex(idx))
+                    }
+                }
+                ParamKind.TOGGLE -> {
+                    val on = (vm.paramValues[p.id] ?: 0) != 0
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.label + mark(p), color = Nux.TextHi)
+                        OnOffPills(on, block.color) { vm.setParam(p, if (it) 1 else 0) }
+                    }
+                }
+                ParamKind.CONTINUOUS -> {}
+            }
+        }
+
+        // continuous params as knobs
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            params.filter { it.kind == ParamKind.CONTINUOUS }.forEach { p ->
+                val v = vm.paramValues[p.id] ?: p.default
+                Knob(p.label + mark(p), v, p.min, p.max, block.color) { vm.setParam(p, it) }
+            }
+        }
+    }
+}
+
+private fun mark(p: KatanaParam) = if (!p.verified) " (?)" else ""
+
+@Composable
+private fun ConnectionStrip(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
+    Panel {
+        if (vm.connected) {
+            Text("● ${vm.connectedLabel}", color = Nux.Orange, fontWeight = FontWeight.SemiBold)
+            if (vm.identityInfo.isNotEmpty()) {
+                Text("ID: ${vm.identityInfo}", color = Nux.TextLo, fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Прочитать", selected = false, accent = Nux.Orange) { vm.readCurrentState() }
+                Pill("Отключить", selected = true, accent = Nux.Orange) { vm.disconnect() }
+            }
+        } else {
+            Text(
+                "Включи Katana, удерживая [BOOSTER] (режим USB-MIDI), подключи кабель USB-C.",
+                color = Nux.TextLo, fontSize = 12.sp,
+            )
+            Pill("Обновить список", selected = false, accent = Nux.Orange) { vm.refreshDevices() }
+            vm.devices.forEach { d: DeviceInfo ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(d.label, color = Nux.TextHi, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Pill("Подключить", selected = true, accent = Nux.Orange) { onConnectRequest(d.device) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ConnectionBar(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(12.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (vm.connected) {
-                Text("● ${vm.connectedLabel}", color = MaterialTheme.colorScheme.primary)
-                if (vm.identityInfo.isNotEmpty()) {
-                    Text(
-                        "ID: ${vm.identityInfo}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
+private fun PresetsScreen(vm: KatanaViewModel) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Text("Пресеты (мои версии)", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+            "Стартовые тоны в духе известных названий. Это мои версии, не оригинальные JNs. " +
+                "Нажми «Загрузить» — параметры уйдут на комбик.",
+            color = Nux.TextLo, fontSize = 12.sp,
+        )
+        FactoryPresets.ALL.forEach { p ->
+            Panel {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+                        if (p.note.isNotEmpty()) Text(p.note, color = Nux.TextLo, fontSize = 11.sp)
+                    }
+                    Pill("Загрузить", selected = true, accent = Nux.Orange) { vm.applyPatch(p) }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { vm.readCurrentState() }) { Text("Прочитать") }
-                    Button(onClick = { vm.disconnect() }) { Text("Отключить") }
-                }
-            } else {
-                OutlinedButton(onClick = { vm.refreshDevices() }) { Text("Обновить список") }
-                Text(
-                    "Важно: включай комбик, удерживая кнопку [BOOSTER], — так активируется " +
-                        "режим USB-MIDI. Затем подключи кабель USB-C.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-                vm.devices.forEach { d: DeviceInfo ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            d.label,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 2,
-                        )
-                        Button(onClick = { onConnectRequest(d.device) }) { Text("Подключить") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryScreen(vm: KatanaViewModel) {
+    var name by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Panel {
+            Text("Сохранить текущий тон", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(value = name, onValueChange = { name = it },
+                label = { Text("название") }, modifier = Modifier.fillMaxWidth())
+            Pill("Сохранить", selected = true, accent = Nux.Orange) {
+                if (name.isNotBlank()) { vm.capturePatch(name); name = "" }
+            }
+        }
+        Panel {
+            Text("Мои пресеты", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            if (vm.patches.isEmpty()) Text("Пока пусто.", color = Nux.TextLo, fontSize = 12.sp)
+            vm.patches.forEach { patch: Patch ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(patch.name, color = Nux.TextHi, modifier = Modifier.weight(1f))
+                    Pill("Загрузить", selected = false, accent = Nux.Orange) { vm.applyPatch(patch) }
+                    Box(Modifier.padding(start = 8.dp)) {
+                        Pill("✕", selected = false, accent = Nux.Amp) { vm.deletePatch(patch.name) }
                     }
                 }
             }
@@ -131,127 +308,8 @@ private fun ConnectionBar(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> 
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AmpTab(vm: KatanaViewModel) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        SectionCard("Каналы") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KatanaParams.CHANNELS.forEachIndexed { i, (name, _) ->
-                    FilterChip(
-                        selected = vm.currentChannel == i,
-                        onClick = { vm.selectChannel(i) },
-                        label = { Text(name) },
-                    )
-                }
-            }
-        }
-
-        KatanaParams.BY_CATEGORY[KatanaParams.AMP_SECTION]?.let { params ->
-            SectionCard(KatanaParams.AMP_SECTION) {
-                params.forEach { p -> ParamControl(vm, p) }
-            }
-        }
-
-        ProfileBanner()
-    }
-}
-
-@Composable
-private fun EffectsTab(vm: KatanaViewModel) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        KatanaParams.EFFECT_SECTIONS.forEach { section ->
-            val params = KatanaParams.BY_CATEGORY[section] ?: return@forEach
-            SectionCard(section) {
-                params.forEach { p -> ParamControl(vm, p) }
-                if (section == "Mod" || section == "FX") {
-                    Text(
-                        "Параметры конкретного типа эффекта редактируются через вкладку " +
-                            "«Консоль» (полная карта под-параметров ещё уточняется).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-            }
-        }
-        ProfileBanner()
-    }
-}
-
-@Composable
-private fun ProfileBanner() {
-    Text(
-        "Профиль адресов: Katana MkII (model 0x33). Для Gen 3 часть адресов может " +
-            "отличаться — параметры с «(?)» не подтверждены. Проверяй и уточняй через " +
-            "вкладку «Консоль» (чтение блока + сравнение).",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.secondary,
-    )
-}
-
-@Composable
-private fun ParamControl(vm: KatanaViewModel, p: KatanaParam) {
-    val value = vm.paramValues[p.id] ?: p.default
-    val mark = if (!p.verified) "  (?)" else ""
-    when (p.kind) {
-        ParamKind.TOGGLE -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(p.label + mark)
-            Switch(checked = value != 0, onCheckedChange = { vm.setParam(p, if (it) 1 else 0) })
-        }
-
-        ParamKind.ENUM -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(p.label + mark)
-            EnumDropdown(p, value) { idx -> vm.setParam(p, p.valueOfIndex(idx)) }
-        }
-
-        ParamKind.CONTINUOUS -> Column(Modifier.padding(vertical = 4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(p.label + mark)
-                Text("$value")
-            }
-            Slider(
-                value = value.toFloat(),
-                onValueChange = { vm.setParam(p, it.toInt()) },
-                valueRange = p.min.toFloat()..p.max.toFloat(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun EnumDropdown(p: KatanaParam, value: Int, onSelect: (Int) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    val index = p.indexOfValue(value)
-    val current = p.options.getOrElse(index) { "?" }
-    Box {
-        OutlinedButton(onClick = { open = true }) { Text(current) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            p.options.forEachIndexed { i, label ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = { open = false; onSelect(i) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConsoleTab(vm: KatanaViewModel) {
+private fun ConsoleScreen(vm: KatanaViewModel) {
     var hex by remember { mutableStateOf("F0 41 00 00 00 00 33 11 60 00 00 30 00 00 00 0A 06 F7") }
     var result by remember { mutableStateOf("") }
     var addr by remember { mutableStateOf("60 00 00 30") }
@@ -259,50 +317,35 @@ private fun ConsoleTab(vm: KatanaViewModel) {
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        SectionCard("Отправить сырой SysEx") {
-            OutlinedTextField(
-                value = hex, onValueChange = { hex = it },
-                label = { Text("hex-байты") }, modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { result = vm.sendRawHex(hex) }) { Text("Отправить") }
-            if (result.isNotEmpty()) Text(result, style = MaterialTheme.typography.bodySmall)
+        DeviceTitle()
+        Panel {
+            Text("Отправить сырой SysEx", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(value = hex, onValueChange = { hex = it },
+                label = { Text("hex") }, modifier = Modifier.fillMaxWidth())
+            Pill("Отправить", selected = true, accent = Nux.Orange) { result = vm.sendRawHex(hex) }
+            if (result.isNotEmpty()) Text(result, color = Nux.TextLo, fontSize = 12.sp)
         }
-
-        SectionCard("Прочитать блок (мэппинг Gen 3)") {
-            Text(
-                "Считай блок → покрути ручку на комбике физически → считай снова → сравни RX. " +
-                    "Изменившийся байт = адрес параметра.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedTextField(
-                value = addr, onValueChange = { addr = it },
-                label = { Text("адрес (4 байта hex)") }, modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = size, onValueChange = { size = it },
-                label = { Text("сколько байт") }, modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16) }) {
-                Text("Запросить")
+        Panel {
+            Text("Прочитать блок (мэппинг Gen 3)", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(value = addr, onValueChange = { addr = it },
+                label = { Text("адрес 4 байта") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = size, onValueChange = { size = it },
+                label = { Text("байт") }, modifier = Modifier.fillMaxWidth())
+            Pill("Запросить", selected = true, accent = Nux.Orange) {
+                result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16)
             }
         }
-
-        SectionCard("Лог (TX/RX)") {
-            OutlinedButton(onClick = { vm.clearLog() }) { Text("Очистить") }
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 320.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
+        Panel {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Лог TX/RX", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+                Pill("Очистить", selected = false, accent = Nux.Orange) { vm.clearLog() }
+            }
+            Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 vm.log.takeLast(200).forEach { line ->
-                    Text(
-                        line,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        maxLines = 1,
-                    )
+                    Text(line, color = Nux.TextHi, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        maxLines = 1, modifier = Modifier.horizontalScroll(rememberScrollState()))
                 }
             }
         }
@@ -310,53 +353,14 @@ private fun ConsoleTab(vm: KatanaViewModel) {
 }
 
 @Composable
-private fun LibraryTab(vm: KatanaViewModel) {
-    var name by remember { mutableStateOf("") }
+private fun Panel(accent: Color = Nux.Stroke, content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        SectionCard("Сохранить текущий тон") {
-            OutlinedTextField(
-                value = name, onValueChange = { name = it },
-                label = { Text("название пресета") }, modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { if (name.isNotBlank()) { vm.capturePatch(name); name = "" } }) {
-                Text("Сохранить")
-            }
-        }
-
-        SectionCard("Мои пресеты") {
-            if (vm.patches.isEmpty()) Text("Пока пусто.", style = MaterialTheme.typography.bodySmall)
-            vm.patches.forEach { patch ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(patch.name, modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = { vm.applyPatch(patch) }) { Text("Загрузить") }
-                    OutlinedButton(
-                        onClick = { vm.deletePatch(patch.name) },
-                        modifier = Modifier.padding(start = 8.dp),
-                    ) { Text("✕") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            content()
-        }
-    }
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Nux.Panel)
+            .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) { content() }
 }
