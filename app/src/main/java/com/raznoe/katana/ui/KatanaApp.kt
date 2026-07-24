@@ -416,6 +416,26 @@ private fun ConsoleScreen(vm: KatanaViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         DeviceTitle()
+        Panel(accent = Nux.Pink) {
+            Text("Тест Gen 3 (экспериментальный диалект)", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Жми и слушай комбик. Если Gain/Volume реально меняются — диалект угадан, " +
+                    "напиши мне, и я включу полноценный режим Gen 3.",
+                color = Nux.TextLo, fontSize = 12.sp,
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Gain 100", selected = true, accent = Nux.Pink) { vm.sendNewGenAmp(0x00, 100) }
+                Pill("Gain 0", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x00, 0) }
+                Pill("Vol 100", selected = true, accent = Nux.Pink) { vm.sendNewGenAmp(0x01, 100) }
+                Pill("Vol 20", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x01, 20) }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Amp 0", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x0C, 0) }
+                Pill("Amp 3", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x0C, 3) }
+                Pill("Bass 100", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x03, 100) }
+                Pill("Treble 100", selected = false, accent = Nux.Pink) { vm.sendNewGenAmp(0x05, 100) }
+            }
+        }
         Panel {
             Text("Отправить сырой SysEx", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(value = hex, onValueChange = { hex = it },

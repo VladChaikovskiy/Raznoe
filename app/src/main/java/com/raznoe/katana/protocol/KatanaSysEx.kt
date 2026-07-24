@@ -111,6 +111,20 @@ object KatanaSysEx {
         return frame(CMD_RQ1, address + sizeBytes)
     }
 
+    /**
+     * EXPERIMENTAL "new-gen" amp SET, in the Katana:GO / Gen-3-era dialect
+     * (from Pyrrhu5/boss-katana-go): F0 41 10 01 05 0D 12 20 00 <knob> <v> <v>
+     * <checksum> F7. knob: gain=0x00, volume=0x01, bass=0x03, middle=0x04,
+     * treble=0x05, presence=0x0A, amp=0x0C. Used only by the Console test.
+     */
+    fun buildNewGenAmpSet(knob: Int, value: Int): ByteArray {
+        val data = intArrayOf(0x20, 0x00, knob and 0x7F, value and 0x7F, value and 0x7F)
+        val sum = checksum(data)
+        val ints = intArrayOf(0xF0, 0x41, 0x10, 0x01, 0x05, 0x0D, 0x12) + data +
+            intArrayOf(sum, SYSEX_END)
+        return ByteArray(ints.size) { (ints[it] and 0xFF).toByte() }
+    }
+
     private fun frame(cmd: Int, body: IntArray): ByteArray {
         val sum = checksum(body)
         val ints = header() + intArrayOf(cmd) + body + intArrayOf(sum, SYSEX_END)
