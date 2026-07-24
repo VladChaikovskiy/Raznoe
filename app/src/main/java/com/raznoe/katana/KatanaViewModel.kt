@@ -60,6 +60,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var noResponse by mutableStateOf(false)
         private set
+    var gotData by mutableStateOf(false)
+        private set
 
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
@@ -118,7 +120,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             onMain { if (dir == "RX") rxCount++ else txCount++ }
             appendLog("$dir  ${KatanaSysEx.toHex(sysex)}")
         }
-        ctl.onIncoming = { incoming -> onMain { applyIncoming(incoming) } }
+        ctl.onIncoming = { incoming -> onMain { gotData = true; applyIncoming(incoming) } }
+        ctl.onInfo = { msg -> appendLog(msg) }
         ctl.onIdentity = { bytes ->
             val hex = bytes.joinToString(" ") { "%02X".format(it) }
             onMain {
@@ -138,21 +141,23 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         connected = true
         connectedLabel = device.productName ?: "BOSS Katana"
         status = "Подключено: $connectedLabel"
-        txCount = 0; rxCount = 0; noResponse = false
+        txCount = 0; rxCount = 0; noResponse = false; gotData = false
         appendLog("— подключено (PID %04X) —".format(device.productId))
         appendLog("USB: ${conn.diagnostics}")
-        appendLog("— рукопожатие + чтение состояния —")
+        appendLog("— рукопожатие + автоопределение диалекта —")
         ctl.begin()
-        // If nothing comes back shortly, the amp is likely not in USB-MIDI mode.
+        // After the handshake + model-id sweep, if we still have no real data
+        // the amp is either not in USB-MIDI mode or needs a physical knob nudge.
         mainHandler.postDelayed({
-            if (connected && rxCount == 0) {
+            if (connected && !gotData) {
                 noResponse = true
                 appendLog(
-                    "⚠ Комбик не ответил (0 RX). Скорее всего он не в режиме USB-MIDI: " +
-                        "выключи и включи его, УДЕРЖИВАЯ кнопку [BOOSTER], затем подключись снова.",
+                    "⚠ Нет данных от комбика. 1) Проверь, что он включён с зажатым [BOOSTER] " +
+                        "(режим USB-MIDI). 2) Покрути любую ручку на самом комбике — приложение " +
+                        "выучит правильный заголовок Gen 3 из его ответа.",
                 )
             }
-        }, 3000)
+        }, 6000)
     }
 
     fun disconnect() {

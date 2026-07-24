@@ -19,6 +19,9 @@ class KatanaController(private val connection: UsbMidiConnection) {
     var onTraffic: ((dir: String, sysex: ByteArray) -> Unit)? = null
     var onIncoming: ((KatanaSysEx.Incoming) -> Unit)? = null
     var onIdentity: ((IntArray) -> Unit)? = null
+    var onInfo: ((String) -> Unit)? = null
+
+    @Volatile private var headerLearned = false
 
     private val sender = Executors.newSingleThreadExecutor { r ->
         Thread(r, "katana-sender").apply { isDaemon = true }
@@ -27,18 +30,60 @@ class KatanaController(private val connection: UsbMidiConnection) {
     /** Reader callback: classify inbound frames (DT1 data vs identity reply). */
     fun handleInbound(sysex: ByteArray) {
         onTraffic?.invoke("RX", sysex)
+        // Auto-detect the Gen 3 dialect: adopt the full Roland prefix from any
+        // DT1 the amp sends (a query reply, or a physical-knob echo).
+        if (KatanaSysEx.adoptHeaderFrom(sysex)) {
+            val first = !headerLearned
+            headerLearned = true
+            onInfo?.invoke("✓ Заголовок устройства определён: ${KatanaSysEx.headerHex()}")
+            if (first) readAll() // re-read now that we speak the right dialect
+        }
         KatanaSysEx.parseIdentityReply(sysex)?.let { onIdentity?.invoke(it) }
         KatanaSysEx.parse(sysex)?.let { onIncoming?.invoke(it) }
     }
 
-    /** Connect handshake: announce ×2, enter editor mode, then read the tone. */
+    /** Connect handshake: announce ×2, editor mode, read the tone, then probe. */
     fun begin() {
+        headerLearned = false
+        KatanaSysEx.resetProfile()
         enqueue(KatanaSysEx.identityRequest(), settleMs = 30)
         val hs = KatanaSysEx.announceHandshake()
         enqueue(hs, settleMs = 20)
         enqueue(hs, settleMs = 20)
         enqueue(KatanaSysEx.editorMode(true), settleMs = 100)
         readAll()
+        probeModelIds()
+    }
+
+    /**
+     * If the default MkII profile gets no reply, sweep every model id (0..0x7F)
+     * with a tiny read; the amp's reply (if any) carries its real prefix, which
+     * [handleInbound] adopts. Sent silently so it doesn't flood the log.
+     */
+    private fun probeModelIds() {
+        for (id in 0..0x7F) {
+            if (sender.isShutdown) return
+            runCatching {
+                sender.submit {
+                    if (headerLearned) return@submit
+                    KatanaSysEx.setModelId(id)
+                    sendSilent(KatanaSysEx.editorMode(true))
+                    sendSilent(KatanaSysEx.buildQuery(intArrayOf(0x00, 0x01, 0x00, 0x00), 1))
+                    sleep(12)
+                }
+            }
+        }
+        runCatching {
+            sender.submit {
+                if (!headerLearned) {
+                    KatanaSysEx.resetProfile()
+                    onInfo?.invoke(
+                        "⚠ Не удалось автоопределить диалект Gen 3. Покрути любую ручку " +
+                            "физически на комбике — приложение выучит заголовок из его ответа.",
+                    )
+                }
+            }
+        }
     }
 
     fun setParam(param: KatanaParam, value: Int) {
@@ -116,6 +161,11 @@ class KatanaController(private val connection: UsbMidiConnection) {
     private fun sendNow(sysex: ByteArray) {
         val ok = connection.sendPackets(UsbMidiPacketizer.encodeSysEx(sysex))
         onTraffic?.invoke(if (ok) "TX" else "TX-FAIL", sysex)
+    }
+
+    /** Send without logging — used by the model-id sweep to avoid log spam. */
+    private fun sendSilent(sysex: ByteArray) {
+        connection.sendPackets(UsbMidiPacketizer.encodeSysEx(sysex))
     }
 
     private fun sleep(ms: Long) = runCatching { if (ms > 0) Thread.sleep(ms) }

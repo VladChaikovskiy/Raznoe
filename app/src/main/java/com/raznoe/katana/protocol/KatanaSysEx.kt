@@ -29,15 +29,43 @@ object KatanaSysEx {
     const val ROLAND_ID = 0x41
 
     /**
-     * Katana model id byte. Gen1/MkII use 0x33 (confirmed by the community
-     * maps). Gen 3 may use a different id — this is a "device profile" knob so
-     * the same code can target either. It can be updated at runtime from an
-     * Identity Reply (see [identityRequest] / [parseIdentityReply]).
+     * The 5 bytes that follow the Roland manufacturer id (0x41) in the header:
+     * a 4-byte device id + the model id. Gen1/MkII use 00 00 00 00 33. Gen 3
+     * uses a DIFFERENT prefix, which we don't know a priori — so we LEARN it at
+     * runtime from any inbound DT1 the amp sends (query reply or a physical
+     * knob echo). See [adoptHeaderFrom].
      */
-    @Volatile var modelId: Int = 0x33
+    @Volatile private var prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, 0x33)
 
-    /** F0 41 00 00 00 00 <model> — everything up to and including the model id. */
-    fun header(): IntArray = intArrayOf(0xF0, ROLAND_ID, 0x00, 0x00, 0x00, 0x00, modelId)
+    /** The model id byte (last of the prefix). */
+    val modelId: Int get() = prefixTail.last()
+
+    /** Force a specific model id with the default 00 00 00 00 device id (probing). */
+    fun setModelId(id: Int) { prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, id and 0x7F) }
+
+    /** Reset to the MkII profile. */
+    fun resetProfile() { prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, 0x33) }
+
+    /** Full header: F0 41 <device id .. model id>. */
+    fun header(): IntArray = intArrayOf(0xF0, ROLAND_ID) + prefixTail
+
+    fun headerHex(): String = header().joinToString(" ") { "%02X".format(it and 0xFF) }
+
+    /**
+     * Adopt the full Roland prefix (device id + model id) from an inbound DT1
+     * frame — this is how we auto-detect the Gen 3 dialect. Returns true if the
+     * prefix changed.
+     */
+    fun adoptHeaderFrom(raw: ByteArray): Boolean {
+        if (raw.size < 9) return false
+        val b = IntArray(raw.size) { raw[it].toInt() and 0xFF }
+        if (b[0] != SYSEX_START || b[1] != ROLAND_ID) return false
+        if (b[7] != CMD_DT1) return false // command sits after F0 41 + 5 prefix bytes
+        val tail = b.copyOfRange(2, 7)
+        if (tail.contentEquals(prefixTail)) return false
+        prefixTail = tail
+        return true
+    }
 
     const val CMD_DT1 = 0x12 // "Data Set 1"  — write parameter(s)
     const val CMD_RQ1 = 0x11 // "Request 1"   — read parameter(s)
@@ -141,18 +169,16 @@ object KatanaSysEx {
      * well-formed Katana DT1 message. The checksum is validated.
      */
     fun parse(raw: ByteArray): Incoming? {
-        val hdr = header()
+        // Prefix-agnostic: F0 41 <5 prefix bytes> 12 <addr4> <data..> <sum> F7.
+        // We don't validate the device id/model id here (Gen 3 differs) — the
+        // command byte position is fixed, and the checksum guards correctness.
         val b = IntArray(raw.size) { raw[it].toInt() and 0xFF }
-        if (b.size < hdr.size + 1 + 4 + 1 + 1) return null
+        if (b.size < 7 + 1 + 4 + 1 + 1) return null
         if (b.first() != SYSEX_START || b.last() != SYSEX_END) return null
-        // Match the Roland/Katana prefix but tolerate a different model-id byte
-        // (Gen 3), so we still parse replies while auto-detecting the profile.
-        for (i in 0 until hdr.size - 1) if (b[i] != hdr[i]) return null
-        if (b[hdr.size] != CMD_DT1) return null
-
-        val addrStart = hdr.size + 1
+        if (b[1] != ROLAND_ID) return null
+        val addrStart = 8 // F0(0) 41(1) prefix(2..6) cmd(7) addr(8..11)
+        if (b[7] != CMD_DT1) return null
         val address = b.copyOfRange(addrStart, addrStart + 4)
-        // data runs from after the address up to (but not including) checksum+F7
         val data = b.copyOfRange(addrStart + 4, b.size - 2)
         val expected = checksum(address + data)
         if (expected != b[b.size - 2]) return null

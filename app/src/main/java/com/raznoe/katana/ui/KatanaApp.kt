@@ -233,11 +233,15 @@ private fun ConnectionStrip(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -
                 Text("ID: ${vm.identityInfo}", color = Nux.TextLo, fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace)
             }
-            Text("Связь: TX ${vm.txCount} · RX ${vm.rxCount}", color = Nux.TextLo, fontSize = 12.sp)
-            if (vm.noResponse) {
+            Text(
+                "Связь: TX ${vm.txCount} · RX ${vm.rxCount}" +
+                    if (vm.gotData) "  ✓ данные идут" else "",
+                color = if (vm.gotData) Nux.Gate else Nux.TextLo, fontSize = 12.sp,
+            )
+            if (vm.noResponse && !vm.gotData) {
                 Text(
-                    "⚠ Комбик не отвечает. Выключи и включи его, УДЕРЖИВАЯ [BOOSTER] " +
-                        "(режим USB-MIDI), затем подключись снова.",
+                    "⚠ Нет данных. 1) Включи комбик, УДЕРЖИВАЯ [BOOSTER] (режим USB-MIDI). " +
+                        "2) Покрути любую ручку на комбике — приложение выучит заголовок Gen 3.",
                     color = Nux.Amp, fontSize = 12.sp,
                 )
             }
