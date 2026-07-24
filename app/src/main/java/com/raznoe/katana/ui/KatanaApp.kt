@@ -231,6 +231,14 @@ private fun ConnectionStrip(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -
                 Text("ID: ${vm.identityInfo}", color = Nux.TextLo, fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace)
             }
+            Text("Связь: TX ${vm.txCount} · RX ${vm.rxCount}", color = Nux.TextLo, fontSize = 12.sp)
+            if (vm.noResponse) {
+                Text(
+                    "⚠ Комбик не отвечает. Выключи и включи его, УДЕРЖИВАЯ [BOOSTER] " +
+                        "(режим USB-MIDI), затем подключись снова.",
+                    color = Nux.Amp, fontSize = 12.sp,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Pill("Прочитать", selected = false, accent = Nux.Orange) { vm.readCurrentState() }
                 Pill("Отключить", selected = true, accent = Nux.Orange) { vm.disconnect() }

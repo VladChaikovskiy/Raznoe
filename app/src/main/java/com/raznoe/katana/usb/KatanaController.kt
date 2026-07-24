@@ -114,8 +114,8 @@ class KatanaController(private val connection: UsbMidiConnection) {
     }
 
     private fun sendNow(sysex: ByteArray) {
-        onTraffic?.invoke("TX", sysex)
-        connection.sendPackets(UsbMidiPacketizer.encodeSysEx(sysex))
+        val ok = connection.sendPackets(UsbMidiPacketizer.encodeSysEx(sysex))
+        onTraffic?.invoke(if (ok) "TX" else "TX-FAIL", sysex)
     }
 
     private fun sleep(ms: Long) = runCatching { if (ms > 0) Thread.sleep(ms) }

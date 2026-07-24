@@ -54,6 +54,12 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var currentChannel by mutableStateOf(0)
         private set
+    var txCount by mutableStateOf(0)
+        private set
+    var rxCount by mutableStateOf(0)
+        private set
+    var noResponse by mutableStateOf(false)
+        private set
 
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
@@ -108,7 +114,10 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         disconnect()
         val conn = UsbMidiConnection(usbManager, device)
         val ctl = KatanaController(conn)
-        ctl.onTraffic = { dir, sysex -> appendLog("$dir  ${KatanaSysEx.toHex(sysex)}") }
+        ctl.onTraffic = { dir, sysex ->
+            onMain { if (dir == "RX") rxCount++ else txCount++ }
+            appendLog("$dir  ${KatanaSysEx.toHex(sysex)}")
+        }
         ctl.onIncoming = { incoming -> onMain { applyIncoming(incoming) } }
         ctl.onIdentity = { bytes ->
             val hex = bytes.joinToString(" ") { "%02X".format(it) }
@@ -129,8 +138,21 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         connected = true
         connectedLabel = device.productName ?: "BOSS Katana"
         status = "Подключено: $connectedLabel"
-        appendLog("— подключено, рукопожатие + чтение состояния —")
+        txCount = 0; rxCount = 0; noResponse = false
+        appendLog("— подключено (PID %04X) —".format(device.productId))
+        appendLog("USB: ${conn.diagnostics}")
+        appendLog("— рукопожатие + чтение состояния —")
         ctl.begin()
+        // If nothing comes back shortly, the amp is likely not in USB-MIDI mode.
+        mainHandler.postDelayed({
+            if (connected && rxCount == 0) {
+                noResponse = true
+                appendLog(
+                    "⚠ Комбик не ответил (0 RX). Скорее всего он не в режиме USB-MIDI: " +
+                        "выключи и включи его, УДЕРЖИВАЯ кнопку [BOOSTER], затем подключись снова.",
+                )
+            }
+        }, 3000)
     }
 
     fun disconnect() {

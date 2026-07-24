@@ -30,6 +30,10 @@ class UsbMidiConnection(
     private var readerThread: Thread? = null
     private lateinit var reassembler: UsbMidiPacketizer.SysExReassembler
 
+    /** Human-readable description of what was found/claimed, for the on-screen log. */
+    var diagnostics: String = ""
+        private set
+
     val isOpen: Boolean get() = connection != null
 
     /**
@@ -38,15 +42,17 @@ class UsbMidiConnection(
      * @return null on success, or a human-readable error string.
      */
     fun open(onSysEx: (ByteArray) -> Unit): String? {
-        val (usbInterface, outEp, inEp) = findMidiInterface()
-            ?: return "No bulk IN/OUT interface found on this device"
+        val found = findMidiInterface()
+            ?: return "Не найден интерфейс с bulk IN+OUT. " + dumpInterfaces() +
+                " — вероятно комбик не в режиме USB-MIDI: выключи и включи его, удерживая [BOOSTER]."
+        val (usbInterface, outEp, inEp) = found
 
         val conn = manager.openDevice(device)
-            ?: return "openDevice failed (permission not granted?)"
+            ?: return "openDevice не удался (нет разрешения USB?)"
 
         if (!conn.claimInterface(usbInterface, true)) {
             conn.close()
-            return "claimInterface failed (device busy / no permission)"
+            return "claimInterface не удался (устройство занято другим приложением?)"
         }
 
         connection = conn
@@ -55,8 +61,35 @@ class UsbMidiConnection(
         endpointIn = inEp
         reassembler = UsbMidiPacketizer.SysExReassembler(onSysEx)
 
+        diagnostics = "iface #${usbInterface.id} class=${usbInterface.interfaceClass}/" +
+            "${usbInterface.interfaceSubclass}, epOut=0x%02X epIn=0x%02X maxPkt=${outEp.maxPacketSize}"
+                .format(outEp.address, inEp.address)
+
         startReader()
         return null
+    }
+
+    /** One-line dump of every interface/endpoint, to explain a discovery failure. */
+    private fun dumpInterfaces(): String {
+        val sb = StringBuilder("Интерфейсов: ${device.interfaceCount}. ")
+        for (n in 0 until device.interfaceCount) {
+            val i = device.getInterface(n)
+            sb.append("[#${i.id} cls=${i.interfaceClass}/${i.interfaceSubclass} ep=")
+            for (e in 0 until i.endpointCount) {
+                val ep = i.getEndpoint(e)
+                val dir = if (ep.direction == UsbConstants.USB_DIR_OUT) "OUT" else "IN"
+                sb.append("${typeName(ep.type)}$dir ")
+            }
+            sb.append("] ")
+        }
+        return sb.toString()
+    }
+
+    private fun typeName(t: Int) = when (t) {
+        UsbConstants.USB_ENDPOINT_XFER_BULK -> "bulk"
+        UsbConstants.USB_ENDPOINT_XFER_INT -> "int"
+        UsbConstants.USB_ENDPOINT_XFER_ISOC -> "iso"
+        else -> "ctl"
     }
 
     /** Send an already USB-MIDI-packetized buffer. */
