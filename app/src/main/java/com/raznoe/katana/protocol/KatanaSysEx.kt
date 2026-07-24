@@ -43,6 +43,9 @@ object KatanaSysEx {
     /** Force a specific model id with the default 00 00 00 00 device id (probing). */
     fun setModelId(id: Int) { prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, id and 0x7F) }
 
+    /** Force the full 5-byte prefix (device id + model id) — used by the sweep. */
+    fun setPrefix(tail: IntArray) { if (tail.size == 5) prefixTail = tail.copyOf() }
+
     /** Reset to the MkII profile. */
     fun resetProfile() { prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, 0x33) }
 

@@ -61,15 +61,21 @@ class KatanaController(private val connection: UsbMidiConnection) {
      * [handleInbound] adopts. Sent silently so it doesn't flood the log.
      */
     private fun probeModelIds() {
-        for (id in 0..0x7F) {
+        // Try both the classic device id (00 00 00 00) and the modern one (10 …,
+        // as used by recent BOSS gear like Katana:GO), sweeping the model byte.
+        val devPrefixes = listOf(
+            intArrayOf(0x00, 0x00, 0x00, 0x00),
+            intArrayOf(0x10, 0x00, 0x00, 0x00),
+        )
+        for (dev in devPrefixes) for (id in 0..0x7F) {
             if (sender.isShutdown) return
             runCatching {
                 sender.submit {
                     if (headerLearned) return@submit
-                    KatanaSysEx.setModelId(id)
+                    KatanaSysEx.setPrefix(dev + intArrayOf(id))
                     sendSilent(KatanaSysEx.editorMode(true))
                     sendSilent(KatanaSysEx.buildQuery(intArrayOf(0x00, 0x01, 0x00, 0x00), 1))
-                    sleep(12)
+                    sleep(8)
                 }
             }
         }
@@ -78,8 +84,9 @@ class KatanaController(private val connection: UsbMidiConnection) {
                 if (!headerLearned) {
                     KatanaSysEx.resetProfile()
                     onInfo?.invoke(
-                        "⚠ Не удалось автоопределить диалект Gen 3. Покрути любую ручку " +
-                            "физически на комбике — приложение выучит заголовок из его ответа.",
+                        "⚠ Диалект Gen 3 не определён автоперебором. У Gen 3 команды устроены " +
+                            "иначе, чем у MkII, и их формат пока не публичный. Нужен захват трафика " +
+                            "BOSS Tone Studio↔Gen3 (USB) — тогда впишу точный протокол.",
                     )
                 }
             }
