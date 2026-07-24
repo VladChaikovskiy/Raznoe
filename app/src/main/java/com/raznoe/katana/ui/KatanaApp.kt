@@ -1,5 +1,6 @@
 package com.raznoe.katana.ui
 
+import android.content.Intent
 import android.hardware.usb.UsbDevice
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -427,10 +429,21 @@ private fun ConsoleScreen(vm: KatanaViewModel) {
                 result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16)
             }
         }
+        val context = LocalContext.current
         Panel {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Лог TX/RX", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-                Pill("Очистить", selected = false, accent = Nux.Orange) { vm.clearLog() }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("Поделиться", selected = true, accent = Nux.Orange) {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "Katana Ctl log")
+                            putExtra(Intent.EXTRA_TEXT, vm.logText())
+                        }
+                        context.startActivity(Intent.createChooser(send, "Поделиться логом"))
+                    }
+                    Pill("Очистить", selected = false, accent = Nux.Orange) { vm.clearLog() }
+                }
             }
             Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 vm.log.takeLast(200).forEach { line ->

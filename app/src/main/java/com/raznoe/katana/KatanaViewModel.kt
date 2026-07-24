@@ -350,6 +350,17 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     // --- Log --------------------------------------------------------------
     fun clearLog() = log.clear()
 
+    /** Full log as shareable text (for sending diagnostics). */
+    fun logText(): String = buildString {
+        append("Katana Ctl — диагностика\n")
+        append("Подключено: $connected  ($connectedLabel)\n")
+        append("ID: ${identityInfo.ifEmpty { "—" }}\n")
+        append("TX=$txCount  RX=$rxCount  noResponse=$noResponse\n")
+        append("Профиль modelId=0x%02X\n".format(KatanaSysEx.modelId))
+        append("----\n")
+        append(log.joinToString("\n"))
+    }
+
     private fun appendLog(line: String) = onMain {
         log.add(line)
         if (log.size > MAX_LOG_LINES) log.removeAt(0)
