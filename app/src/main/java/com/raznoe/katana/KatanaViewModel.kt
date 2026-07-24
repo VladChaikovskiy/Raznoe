@@ -257,25 +257,28 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         if (index !in tracks.indices) return
         releasePlayer()
         val t = tracks[index]
-        player = MediaPlayer().apply {
-            setOnPreparedListener { mp ->
-                durationMs = mp.duration
-                applySpeed(mp)
-                mp.isLooping = looping
-                mp.start()
-                isPlaying = true
-            }
-            setOnCompletionListener {
-                if (!looping) { isPlaying = false; positionMs = durationMs }
-            }
-            setOnErrorListener { _, _, _ -> isPlaying = false; true }
-            runCatching {
-                setDataSource(app, Uri.parse(t.uri))
-                prepareAsync()
-            }.onFailure { isPlaying = false }
+        // Note: don't use MediaPlayer().apply { } here — inside `apply` the
+        // receiver is the MediaPlayer, whose read-only `isPlaying` would shadow
+        // our own state property. Configure via an explicit local instead.
+        val mp = MediaPlayer()
+        mp.setOnPreparedListener { p ->
+            durationMs = p.duration
+            applySpeed(p)
+            p.isLooping = looping
+            p.start()
+            isPlaying = true
         }
+        mp.setOnCompletionListener {
+            if (!looping) { isPlaying = false; positionMs = durationMs }
+        }
+        mp.setOnErrorListener { _, _, _ -> isPlaying = false; true }
+        player = mp
         currentTrack = index
         positionMs = 0
+        runCatching {
+            mp.setDataSource(app, Uri.parse(t.uri))
+            mp.prepareAsync()
+        }.onFailure { isPlaying = false }
     }
 
     fun togglePlayPause() {
