@@ -130,11 +130,12 @@ object KatanaSysEx {
      */
     fun buildQuery(address: IntArray, size: Int): ByteArray {
         require(address.size == 4) { "Katana address must be 4 bytes" }
-        // size is expressed as a 4-byte big-endian 7-bit value
+        // Size is 4 big-endian bytes, exactly as the official app encodes it
+        // (verified against Katana Librarian's s1(): i6>>>24, >>>16, >>>8, i6).
         val sizeBytes = intArrayOf(
-            (size shr 21) and 0x7F,
-            (size shr 14) and 0x7F,
-            (size shr 7) and 0x7F,
+            (size shr 24) and 0x7F,
+            (size shr 16) and 0x7F,
+            (size shr 8) and 0x7F,
             size and 0x7F,
         )
         return frame(CMD_RQ1, address + sizeBytes)
