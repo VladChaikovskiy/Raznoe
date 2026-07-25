@@ -27,32 +27,37 @@ class KatanaController(private val connection: UsbMidiConnection) {
         Thread(r, "katana-sender").apply { isDaemon = true }
     }
 
-    /** Reader callback: classify inbound frames (DT1 data vs identity reply). */
+    /** Reader callback: classify inbound frames (identity reply, DT1 data). */
     fun handleInbound(sysex: ByteArray) {
         onTraffic?.invoke("RX", sysex)
-        // Auto-detect the Gen 3 dialect: adopt the full Roland prefix from any
-        // DT1 the amp sends (a query reply, or a physical-knob echo).
-        if (KatanaSysEx.adoptHeaderFrom(sysex)) {
+        // Primary: decode the dialect (MkII / Gen3 / GO) from the Identity Reply,
+        // exactly like the official app. This sets the right header prefix.
+        if (KatanaSysEx.adoptFromIdentity(sysex)) {
             val first = !headerLearned
             headerLearned = true
-            onInfo?.invoke("✓ Заголовок устройства определён: ${KatanaSysEx.headerHex()}")
-            if (first) readAll() // re-read now that we speak the right dialect
+            onInfo?.invoke("✓ ${KatanaSysEx.generation} — заголовок ${KatanaSysEx.headerHex()}")
+            if (first) {
+                enqueue(KatanaSysEx.editorMode(true), settleMs = 60)
+                readAll()
+            }
+        } else if (KatanaSysEx.adoptHeaderFrom(sysex)) {
+            headerLearned = true
+            onInfo?.invoke("✓ Заголовок из ответа: ${KatanaSysEx.headerHex()}")
         }
         KatanaSysEx.parseIdentityReply(sysex)?.let { onIdentity?.invoke(it) }
         KatanaSysEx.parse(sysex)?.let { onIncoming?.invoke(it) }
     }
 
-    /** Connect handshake: announce ×2, editor mode, read the tone, then probe. */
+    /** Connect: identity request (→ dialect), announce, editor mode, read tone. */
     fun begin() {
         headerLearned = false
         KatanaSysEx.resetProfile()
-        enqueue(KatanaSysEx.identityRequest(), settleMs = 30)
+        enqueue(KatanaSysEx.identityRequest(), settleMs = 60)
         val hs = KatanaSysEx.announceHandshake()
         enqueue(hs, settleMs = 20)
         enqueue(hs, settleMs = 20)
         enqueue(KatanaSysEx.editorMode(true), settleMs = 100)
         readAll()
-        probeModelIds()
     }
 
     /**
@@ -120,7 +125,9 @@ class KatanaController(private val connection: UsbMidiConnection) {
     }
 
     fun readAll() {
-        for (r in KatanaParams.READ_RANGES) {
+        val ranges = if (KatanaSysEx.generation == KatanaSysEx.Gen.GEN3)
+            KatanaParams.GEN3_READ_RANGES else KatanaParams.READ_RANGES
+        for (r in ranges) {
             enqueue(KatanaSysEx.buildQuery(r.address, r.size), settleMs = 30)
         }
     }

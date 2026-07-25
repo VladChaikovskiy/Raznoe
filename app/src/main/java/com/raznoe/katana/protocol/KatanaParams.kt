@@ -196,6 +196,29 @@ object KatanaParams {
 
     // ---- Live-patch read spans (RQ1 these to snapshot current tone) ------
     data class ReadRange(val address: IntArray, val size: Int)
+
+    /**
+     * Gen 3 initial-read sequence, decoded from the Katana Librarian app's k1()
+     * for KATANA_MK3: a system probe, the 9 patch sections (Y0 base 0x20000000),
+     * and a couple of small blocks. These are valid Gen 3 addresses that make the
+     * amp reply — the milestone that proves Gen 3 comms.
+     */
+    val GEN3_READ_RANGES = listOf(
+        ReadRange(a(0x7F, 0x00, 0x00, 0x00), 1),
+        ReadRange(a(0x20, 0x10, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x20, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x30, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x40, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x50, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x60, 0x00, 0x00), 16),
+        ReadRange(a(0x20, 0x70, 0x00, 0x00), 16),
+        ReadRange(a(0x21, 0x00, 0x00, 0x00), 16),
+        ReadRange(a(0x21, 0x10, 0x00, 0x00), 16),
+        ReadRange(a(0x00, 0x00, 0x00, 0x00), 4),
+        ReadRange(a(0x10, 0x00, 0x24, 0x00), 1),
+        ReadRange(a(0x10, 0x00, 0x26, 0x00), 13),
+    )
+
     val READ_RANGES = listOf(
         ReadRange(a(0x00, 0x00, 0x04, 0x20), 0x0A),   // amp panel
         ReadRange(a(0x60, 0x00, 0x00, 0x30), 0x0A),   // booster
