@@ -408,6 +408,21 @@ private fun JamScreen(vm: KatanaViewModel) {
         }
 
         Panel {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Блокировать кнопки телефона", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+                OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
+            }
+            Text(
+                "Включи, если при подключённом AUX-кабеле сама скачет громкость или срабатывают " +
+                    "кнопки — это наводка по кабелю. Блокирует кнопки громкости/медиа, пока открыто " +
+                    "приложение. Лучшее решение — кабель-переходник TRRS→TRS (3 контакта) или " +
+                    "устранитель «земляной петли» (ground loop isolator).",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+        }
+
+        Panel {
             Text("Как вывести звук в комбик", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Text(
                 "Важное ограничение Katana Gen 3: по одному USB-кабелю Android умеет ЛИБО " +

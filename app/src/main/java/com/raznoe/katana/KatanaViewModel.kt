@@ -97,7 +97,16 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     /** true => route MP3 to the amp's USB-audio out (mix with guitar in the combo). */
     var jamThroughAmp by mutableStateOf(true)
         private set
+    /**
+     * true => the Activity swallows hardware volume/media key events. Guards
+     * against phantom key presses induced by ground-loop noise when an analog
+     * AUX cable and USB are connected at the same time.
+     */
+    var lockHardwareKeys by mutableStateOf(false)
+        private set
     private var player: MediaPlayer? = null
+
+    fun setKeyLock(on: Boolean) { lockHardwareKeys = on }
 
     fun chooseJamOutput(throughAmp: Boolean) {
         jamThroughAmp = throughAmp

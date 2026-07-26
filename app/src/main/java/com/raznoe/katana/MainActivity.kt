@@ -9,6 +9,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -57,6 +58,17 @@ class MainActivity : ComponentActivity() {
         handleAttachIntent(intent)
     }
 
+    /**
+     * When the "lock phone buttons" jam option is on, swallow hardware volume
+     * and media/headset key events. These are what a 4-pole (TRRS) AUX cable +
+     * USB ground loop injects as phantom presses; consuming them here stops the
+     * random volume changes and stray media-button actions while jamming.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (vm.lockHardwareKeys && event.keyCode in NUISANCE_KEYS) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     /** Auto-connect when the amp is plugged in and launches us. */
     private fun handleAttachIntent(intent: Intent?) {
         if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
@@ -92,5 +104,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_USB_PERMISSION = "com.raznoe.katana.USB_PERMISSION"
+        private val NUISANCE_KEYS = setOf(
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE,
+            KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_STOP,
+        )
     }
 }
