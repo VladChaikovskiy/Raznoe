@@ -1,5 +1,6 @@
 package com.raznoe.katana.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,7 +35,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /** NUX-style circular arc knob: orange arc on a grey track, value in the centre.
  *  Change the value by dragging vertically. */
@@ -53,6 +56,8 @@ fun Knob(
     LaunchedEffect(value) { acc = value.toFloat() }
 
     val frac = ((value - min).toFloat() / range).coerceIn(0f, 1f)
+    // Smoothly animate the arc + indicator toward the current value.
+    val animFrac by animateFloatAsState(targetValue = frac, label = "knobFrac")
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         Box(
             contentAlignment = Alignment.Center,
@@ -79,10 +84,21 @@ fun Knob(
                     style = Stroke(width = sw, cap = StrokeCap.Round),
                 )
                 drawArc(
-                    color = accent, startAngle = start, sweepAngle = full * frac,
+                    color = accent, startAngle = start, sweepAngle = full * animFrac,
                     useCenter = false, topLeft = topLeft, size = arcSize,
                     style = Stroke(width = sw, cap = StrokeCap.Round),
                 )
+                // Rotating position indicator at the end of the filled arc.
+                val angleRad = Math.toRadians((start + full * animFrac).toDouble())
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val r = arcSize.width / 2f
+                val dot = Offset(
+                    cx + (r * cos(angleRad)).toFloat(),
+                    cy + (r * sin(angleRad)).toFloat(),
+                )
+                drawCircle(color = Color.White, radius = sw * 0.55f, center = dot)
+                drawCircle(color = accent, radius = sw * 0.35f, center = dot)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(label, color = Nux.TextLo, fontSize = 12.sp)

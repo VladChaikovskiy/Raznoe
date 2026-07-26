@@ -20,6 +20,7 @@ class KatanaController(private val connection: UsbMidiConnection) {
     var onIncoming: ((KatanaSysEx.Incoming) -> Unit)? = null
     var onIdentity: ((IntArray) -> Unit)? = null
     var onInfo: ((String) -> Unit)? = null
+    var onSelectors: ((IntArray) -> Unit)? = null
 
     @Volatile private var headerLearned = false
 
@@ -63,10 +64,14 @@ class KatanaController(private val connection: UsbMidiConnection) {
         val a = inc.address
         if (a.size == 4 && a[0] == 0x20 && a[1] == 0x00 && a[2] == 0x04) {
             val start = a[3]
+            var changed = false
             for (i in inc.data.indices) {
                 val slot = start + i
-                if (slot in gen3Selectors.indices) gen3Selectors[slot] = inc.data[i] and 0x7F
+                if (slot in gen3Selectors.indices) {
+                    gen3Selectors[slot] = inc.data[i] and 0x7F; changed = true
+                }
             }
+            if (changed) onSelectors?.invoke(gen3Selectors.copyOf())
         }
     }
 
@@ -144,7 +149,20 @@ class KatanaController(private val connection: UsbMidiConnection) {
         } else {
             intArrayOf(v and 0x7F)
         }
-        enqueue(KatanaSysEx.buildSet(resolveAddress(param), data), settleMs = 4)
+        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
+        val slots = param.gen3Slots
+        if (gen3 && slots != null) {
+            // Banked effect param: which physical slot is active depends on the
+            // FX-BOX selector, which we may not have read reliably. Writing every
+            // candidate slot is what the app does (N() with the MK3 flag) and is
+            // harmless — inactive slots aren't in the signal path — so the active
+            // one always receives the value.
+            for (base in slots) {
+                enqueue(KatanaSysEx.buildSet(KatanaSysEx.gen3AddrFromBase(base, param.gen3Index), data), settleMs = 4)
+            }
+        } else {
+            enqueue(KatanaSysEx.buildSet(resolveAddress(param), data), settleMs = 4)
+        }
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */

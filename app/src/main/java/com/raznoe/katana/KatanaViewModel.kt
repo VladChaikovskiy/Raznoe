@@ -6,6 +6,7 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -93,7 +94,49 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var activePreset by mutableStateOf("")
         private set
+    /** true => route MP3 to the amp's USB-audio out (mix with guitar in the combo). */
+    var jamThroughAmp by mutableStateOf(true)
+        private set
     private var player: MediaPlayer? = null
+
+    fun setJamThroughAmp(on: Boolean) {
+        jamThroughAmp = on
+        // Re-apply routing live if a track is playing.
+        player?.let { applyPreferredOutput(it) }
+    }
+
+    /** Names of the current audio output routes (for the UI/log). */
+    fun audioOutputs(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "?"
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .joinToString(", ") { audioTypeName(it.type) }
+            .ifEmpty { "нет" }
+    }
+
+    private fun usbOutput(): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+        }
+    }
+
+    /** Force MP3 output to the amp's USB audio when requested and available. */
+    private fun applyPreferredOutput(mp: MediaPlayer) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        val target = if (jamThroughAmp) usbOutput() else null
+        runCatching { mp.setPreferredDevice(target) }
+    }
+
+    private fun audioTypeName(type: Int): String = when (type) {
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET,
+        AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB(комбик)"
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "динамик"
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> "наушники"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth"
+        else -> "тип$type"
+    }
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var focusRequest: AudioFocusRequest? = null
 
@@ -168,6 +211,10 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }
         ctl.onIncoming = { incoming -> onMain { gotData = true; applyIncoming(incoming) } }
         ctl.onInfo = { msg -> appendLog(msg) }
+        ctl.onSelectors = { sel ->
+            logAction("gen3sel", "Gen3 FX-BOX слоты: booster=${sel[0]} mod=${sel[1]} " +
+                "fx=${sel[2]} delay=${sel[3]} reverb=${sel[4]}")
+        }
         ctl.onIdentity = { bytes ->
             val hex = bytes.joinToString(" ") { "%02X".format(it) }
             onMain {
@@ -401,15 +448,19 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             durationMs = p.duration
             p.isLooping = looping
             requestAudioFocus()
+            applyPreferredOutput(p)
             runCatching { p.setVolume(mp3Volume, mp3Volume) }
             p.start()
             applySpeed(p) // after start() — setting speed pre-start throws on some devices
             isPlaying = true
-            jamStatus = "Играет: ${t.name}"
-            val out = if (audioManager.isBluetoothA2dpOn) "Bluetooth"
-                else if (audioManager.isWiredHeadsetOn) "наушники/USB"
-                else "динамик"
-            logAction("", "Джем: играет «${t.name}» (${durationMs / 1000}с, громкость ${(mp3Volume * 100).toInt()}%, выход: $out)")
+            val usb = usbOutput()
+            val out = when {
+                jamThroughAmp && usb != null -> "комбик (USB)"
+                usb != null -> "динамик (комбик доступен — включи «через комбик»)"
+                else -> "динамик (USB-аудио комбика не найдено)"
+            }
+            jamStatus = "Играет: ${t.name} · $out"
+            logAction("", "Джем: играет «${t.name}» (${durationMs / 1000}с, громкость ${(mp3Volume * 100).toInt()}%, выход: $out; все выходы: ${audioOutputs()})")
         }
         mp.setOnCompletionListener {
             if (!looping) { isPlaying = false; positionMs = durationMs; abandonAudioFocus() }

@@ -387,6 +387,24 @@ private fun JamScreen(vm: KatanaViewModel) {
             }
         }
 
+        Panel(accent = Nux.Pink) {
+            Text("Куда играет минусовка", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Через комбик (USB)", selected = vm.jamThroughAmp, accent = Nux.Orange) {
+                    vm.setJamThroughAmp(true)
+                }
+                Pill("Через телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) {
+                    vm.setJamThroughAmp(false)
+                }
+            }
+            Text(
+                "«Через комбик» — MP3 идёт в USB-аудио Katana и играет вместе с гитарой " +
+                    "из динамика комбика. Нужно, чтобы комбик был подключён по USB и телефон " +
+                    "его видел. Доступные выходы: ${vm.audioOutputs()}",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+        }
+
         Panel {
             Text("Громкость", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Text("Минусовка (MP3): ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
