@@ -67,6 +67,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
     val log = mutableStateListOf<String>()
+    val actionLog = mutableStateListOf<String>()
     val patches = mutableStateListOf<Patch>()
 
     // --- Jam player state -------------------------------------------------
@@ -178,17 +179,52 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         status = "Не подключено"
     }
 
+    // --- Action log (what the user pressed, address used, sent or not) ----
+    private var lastActionKey = ""
+
+    private fun logAction(key: String, text: String) = onMain {
+        if (key.isNotEmpty() && key == lastActionKey && actionLog.isNotEmpty()) {
+            actionLog[actionLog.size - 1] = text
+        } else {
+            actionLog.add(text)
+            if (actionLog.size > 600) actionLog.removeAt(0)
+        }
+        lastActionKey = key
+    }
+
+    private fun addrHex(a: IntArray) = a.joinToString(" ") { "%02X".format(it and 0xFF) }
+
+    fun clearActionLog() { actionLog.clear(); lastActionKey = "" }
+
+    fun actionLogText(): String = buildString {
+        append("Katana Ctl — журнал действий\n")
+        append("Подключено: $connected ($connectedLabel)  ID: ${identityInfo.ifEmpty { "—" }}\n")
+        append("Профиль: ${KatanaSysEx.generation}  заголовок ${KatanaSysEx.headerHex()}\n")
+        append("TX=$txCount RX=$rxCount\n----\n")
+        append(actionLog.joinToString("\n"))
+    }
+
     // --- Controls ---------------------------------------------------------
     fun setParam(param: KatanaParam, value: Int) {
         val stored = if (param.kind == ParamKind.ENUM) value else value.coerceIn(param.min, param.max)
         paramValues[param.id] = stored
         controller?.setParam(param, stored)
+        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
+        val valTxt = when (param.kind) {
+            ParamKind.TOGGLE -> if (stored != 0) "ON" else "OFF"
+            ParamKind.ENUM -> param.options.getOrElse(param.indexOfValue(stored)) { "$stored" }
+            ParamKind.CONTINUOUS -> "$stored"
+        }
+        val where = if (controller == null) "(нет связи)"
+        else "→ ${addrHex(param.addressFor(gen3))}${if (gen3) " G3" else ""}"
+        logAction(param.id, "${param.category}/${param.label}: $valTxt  $where")
     }
 
     fun selectChannel(index: Int) {
-        val (_, dataByte) = KatanaParams.CHANNELS.getOrElse(index) { return }
+        val (name, dataByte) = KatanaParams.CHANNELS.getOrElse(index) { return }
         currentChannel = index
         controller?.selectChannel(dataByte)
+        logAction("channel", "Канал → $name  ${if (controller == null) "(нет связи)" else "→ 00 01 00 00"}")
     }
 
     fun readCurrentState() {
@@ -269,6 +305,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }
         activePreset = patch.name
         appendLog("— применён пресет '${patch.name}' —")
+        logAction("", "Пресет загружен: ${patch.name}  ${if (controller == null) "(нет связи)" else "(отправлен)"}")
     }
 
     fun deletePatch(name: String) {
@@ -291,6 +328,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             jamStatus = "Уже в списке: $name"
         }
+        logAction("", "Джем: добавлен трек «$name»")
     }
 
     fun setMp3Volume(v: Float) {
@@ -341,12 +379,14 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         currentTrack = index
         positionMs = 0
         jamStatus = "Загрузка: ${t.name}…"
+        logAction("", "Джем: запуск «${t.name}»")
         runCatching {
             mp.setDataSource(app, Uri.parse(t.uri))
             mp.prepareAsync()
         }.onFailure {
             isPlaying = false
             jamStatus = "Не удалось открыть файл: ${it.message}"
+            logAction("", "Джем: ошибка открытия «${t.name}»: ${it.message}")
         }
     }
 

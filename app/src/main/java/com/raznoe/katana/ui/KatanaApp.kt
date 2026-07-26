@@ -35,8 +35,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,6 +75,7 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
                 2 -> PresetsScreen(vm)
                 3 -> JamScreen(vm)
                 4 -> LibraryScreen(vm)
+                5 -> LogScreen(vm)
                 else -> ConsoleScreen(vm)
             }
         }
@@ -82,7 +85,7 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека", "Консоль")
+    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека", "Лог", "Консоль")
     Row(
         Modifier.fillMaxWidth().background(Nux.Panel)
             .horizontalScroll(rememberScrollState())
@@ -464,6 +467,72 @@ private fun LibraryScreen(vm: KatanaViewModel) {
                     Pill("Загрузить", selected = false, accent = Nux.Orange) { vm.applyPatch(patch) }
                     Box(Modifier.padding(start = 8.dp)) {
                         Pill("✕", selected = false, accent = Nux.Amp) { vm.deletePatch(patch.name) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogScreen(vm: KatanaViewModel) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Text(
+            "Журнал действий: всё, что ты нажимаешь, и сработало ли это. " +
+                "Пройдись по вкладкам, нажми кнопки/ручки/тумблеры — потом жми «Копировать всё» и пришли мне.",
+            color = Nux.TextLo, fontSize = 12.sp,
+        )
+        Panel(accent = Nux.Orange) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill(if (copied) "Скопировано ✓" else "Копировать всё", selected = true, accent = Nux.Orange) {
+                    clipboard.setText(AnnotatedString(vm.actionLogText()))
+                    copied = true
+                }
+                Pill("Поделиться", selected = false, accent = Nux.Orange) {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Katana Ctl — журнал действий")
+                        putExtra(Intent.EXTRA_TEXT, vm.actionLogText())
+                    }
+                    context.startActivity(Intent.createChooser(send, "Поделиться журналом"))
+                }
+                Pill("Очистить", selected = false, accent = Nux.Orange) {
+                    vm.clearActionLog(); copied = false
+                }
+            }
+            Text(
+                "Записей: ${vm.actionLog.size}   Связь: ${if (vm.connected) "есть" else "нет"}   " +
+                    "TX=${vm.txCount} RX=${vm.rxCount}",
+                color = Nux.TextLo, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            )
+        }
+        Panel {
+            if (vm.actionLog.isEmpty()) {
+                Text(
+                    "Пока пусто. Нажми что-нибудь на любой вкладке — здесь появится запись.",
+                    color = Nux.TextLo, fontSize = 12.sp,
+                )
+            } else {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    vm.actionLog.forEach { line ->
+                        val ok = !line.contains("нет связи") && !line.contains("ошибка")
+                        Text(
+                            line,
+                            color = if (ok) Nux.TextHi else Nux.Pink,
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        )
                     }
                 }
             }
