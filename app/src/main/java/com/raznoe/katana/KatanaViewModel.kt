@@ -99,8 +99,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private set
     private var player: MediaPlayer? = null
 
-    fun setJamThroughAmp(on: Boolean) {
-        jamThroughAmp = on
+    fun chooseJamOutput(throughAmp: Boolean) {
+        jamThroughAmp = throughAmp
         // Re-apply routing live if a track is playing.
         player?.let { applyPreferredOutput(it) }
     }

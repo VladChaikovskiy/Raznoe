@@ -391,10 +391,10 @@ private fun JamScreen(vm: KatanaViewModel) {
             Text("Куда играет минусовка", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Через комбик (USB)", selected = vm.jamThroughAmp, accent = Nux.Orange) {
-                    vm.setJamThroughAmp(true)
+                    vm.chooseJamOutput(true)
                 }
                 Pill("Через телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) {
-                    vm.setJamThroughAmp(false)
+                    vm.chooseJamOutput(false)
                 }
             }
             Text(
