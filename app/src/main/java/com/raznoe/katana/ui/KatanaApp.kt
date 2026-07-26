@@ -153,8 +153,10 @@ private fun PatchScreen(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Un
         BlockEditor(vm, CHAIN[selectedBlock])
 
         Text(
-            "Профиль адресов: Katana MkII. Для Gen 3 «(?)»-параметры не подтверждены — " +
-                "проверяй через вкладку «Консоль».",
+            "Gen 3: усилитель, вкл/выкл эффектов и параметры бустера/дилея/ревера/гейта " +
+                "используют реальные адреса Gen 3 (эффекты — с учётом слота FX-BOX). " +
+                "Параметры Mod/FX (тип и настройки) на Gen 3 устроены сложнее и пока в работе. " +
+                "Что уходит в комбик — видно на вкладке «Лог».",
             color = Nux.TextLo, fontSize = 12.sp,
         )
     }

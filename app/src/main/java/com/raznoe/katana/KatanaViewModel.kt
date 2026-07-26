@@ -6,8 +6,11 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
@@ -91,6 +94,41 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     var activePreset by mutableStateOf("")
         private set
     private var player: MediaPlayer? = null
+    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focusRequest: AudioFocusRequest? = null
+
+    private fun requestAudioFocus() {
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(attrs)
+                    .setWillPauseWhenDucked(false)
+                    .build()
+                focusRequest = req
+                audioManager.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(
+                    null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
+                )
+            }
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION") audioManager.abandonAudioFocus(null)
+            }
+        }
+        focusRequest = null
+    }
 
     init {
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
@@ -215,8 +253,9 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             ParamKind.ENUM -> param.options.getOrElse(param.indexOfValue(stored)) { "$stored" }
             ParamKind.CONTINUOUS -> "$stored"
         }
-        val where = if (controller == null) "(нет связи)"
-        else "→ ${addrHex(param.addressFor(gen3))}${if (gen3) " G3" else ""}"
+        val ctl = controller
+        val where = if (ctl == null) "(нет связи)"
+        else "→ ${addrHex(ctl.resolveAddress(param))}${if (gen3) " G3" else ""}"
         logAction(param.id, "${param.category}/${param.label}: $valTxt  $where")
     }
 
@@ -361,18 +400,24 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         mp.setOnPreparedListener { p ->
             durationMs = p.duration
             p.isLooping = looping
+            requestAudioFocus()
             runCatching { p.setVolume(mp3Volume, mp3Volume) }
             p.start()
             applySpeed(p) // after start() — setting speed pre-start throws on some devices
             isPlaying = true
             jamStatus = "Играет: ${t.name}"
+            val out = if (audioManager.isBluetoothA2dpOn) "Bluetooth"
+                else if (audioManager.isWiredHeadsetOn) "наушники/USB"
+                else "динамик"
+            logAction("", "Джем: играет «${t.name}» (${durationMs / 1000}с, громкость ${(mp3Volume * 100).toInt()}%, выход: $out)")
         }
         mp.setOnCompletionListener {
-            if (!looping) { isPlaying = false; positionMs = durationMs }
+            if (!looping) { isPlaying = false; positionMs = durationMs; abandonAudioFocus() }
         }
         mp.setOnErrorListener { _, what, extra ->
             isPlaying = false
             jamStatus = "Ошибка воспроизведения ($what/$extra). Попробуй другой файл."
+            logAction("", "Джем: ОШИБКА воспроизведения «${t.name}» (код $what/$extra)")
             true
         }
         player = mp
@@ -386,7 +431,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }.onFailure {
             isPlaying = false
             jamStatus = "Не удалось открыть файл: ${it.message}"
-            logAction("", "Джем: ошибка открытия «${t.name}»: ${it.message}")
+            logAction("", "Джем: ошибка открытия «${t.name}»: ${it.message} " +
+                "(возможно, потерян доступ к файлу — добавь его заново)")
         }
     }
 
@@ -397,7 +443,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopPlayback() {
-        releasePlayer(); isPlaying = false; positionMs = 0
+        releasePlayer(); isPlaying = false; positionMs = 0; abandonAudioFocus()
     }
 
     fun seekTo(ms: Int) {

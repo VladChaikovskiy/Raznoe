@@ -47,7 +47,23 @@ object FactoryPresets {
     }
 
     private fun preset(name: String, note: String, build: Builder.() -> Unit): Patch {
-        val b = Builder(); b.build(); return Patch(name = name, values = b.v, note = note)
+        val b = Builder(); b.build()
+        // Loudness leveling: hotter tones (high gain / boost) put out much more
+        // signal, so we trim the amp Level per preset to roughly equalize how
+        // loud each preset sounds. This is an approximation, not metered LUFS —
+        // fine-tune Volume on the Патч tab if a tone is still off.
+        b.v["volume"] = normalizedLevel(b.v)
+        return Patch(name = name, values = b.v, note = note)
+    }
+
+    /** Approximate equal-loudness amp Level from gain + boost drive/level. */
+    private fun normalizedLevel(v: Map<String, Int>): Int {
+        val gain = v["gain"] ?: 50
+        val boostOn = (v["boost_sw"] ?: 0) == 1
+        val boostLvl = if (boostOn) v["boost_level"] ?: 0 else 0
+        val boostDrive = if (boostOn) v["boost_drive"] ?: 0 else 0
+        val lvl = 96 - (gain * 0.28).toInt() - (boostLvl * 0.12).toInt() - (boostDrive * 0.10).toInt()
+        return lvl.coerceIn(45, 95)
     }
 
     private const val N = "Моя версия (не оригинал JNs)"

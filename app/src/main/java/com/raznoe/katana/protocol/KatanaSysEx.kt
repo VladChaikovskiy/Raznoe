@@ -102,6 +102,25 @@ object KatanaSysEx {
     const val CMD_DT1 = 0x12 // "Data Set 1"  — write parameter(s)
     const val CMD_RQ1 = 0x11 // "Request 1"   — read parameter(s)
 
+    // Gen 3 address arithmetic, ported verbatim from the Katana Librarian
+    // (classes y.c / y.g). A parameter's wire address is
+    //   0x20000000 + y.g(y.c(sectionBase) + indexInSection)
+    // where the section bases come from the app's `m` enum (AMP=1536, SW=2048,
+    // BOOSTER(1)=2560, DELAY(1)=10240, REVERB(1)=13312, NS=22528, …).
+    private fun yc(i: Int): Int =
+        ((i shr 24) and 0xFF) * 0x200000 + ((i shr 16) and 0xFF) * 0x4000 +
+            ((i shr 8) and 0xFF) * 0x80 + (i and 0xFF)
+
+    private fun yg(i: Int): Int =
+        (i and 127) or (((i shr 21) and 127) shl 24) or
+            (((i shr 14) and 127) shl 16) or (((i shr 7) and 127) shl 8)
+
+    /** Gen 3 4-byte wire address for a section base + parameter index. */
+    fun gen3AddrFromBase(sectionBase: Int, index: Int): IntArray {
+        val a = 0x20000000 + yg(yc(sectionBase) + index)
+        return intArrayOf((a shr 24) and 0x7F, (a shr 16) and 0x7F, (a shr 8) and 0x7F, a and 0x7F)
+    }
+
     /** Roland checksum over [bytes] (address + payload). */
     fun checksum(bytes: IntArray): Int {
         var sum = 0

@@ -35,13 +35,29 @@ data class KatanaParam(
     val word: Boolean = false,
     /** false => address not yet confirmed for Gen 3 (shows "(?)"). */
     val verified: Boolean = false,
-    /** Gen 3 wire address (decoded from Katana Librarian), if known. */
+    /** Gen 3 fixed wire address (decoded from Katana Librarian), if known. */
     val addrGen3: IntArray? = null,
+    /**
+     * Gen 3 "banked" effect params: the section base depends on which physical
+     * slot the effect currently occupies, chosen at runtime by an FX-BOX
+     * selector byte. [gen3Slots] holds the candidate section bases (slot 0/1/2),
+     * [gen3Index] the param offset in the section, and [gen3Sel] the selector's
+     * offset within the COLOR block (0=FX1A booster, 3=FX2A delay, 4=FX3 reverb).
+     * The actual address = KatanaSysEx.gen3AddrFromBase(gen3Slots[selValue], gen3Index).
+     */
+    val gen3Slots: IntArray? = null,
+    val gen3Index: Int = 0,
+    val gen3Sel: Int = -1,
 ) {
     override fun equals(other: Any?) = other is KatanaParam && other.id == id
     override fun hashCode() = id.hashCode()
 
-    /** The wire address for a given generation (Gen 3 map where available). */
+    /**
+     * Fixed wire address for a generation. NOTE: Gen 3 "banked" params
+     * ([gen3Slots] != null) are resolved by [KatanaController] against the live
+     * selector cache, not here — this returns the MkII address for them so the
+     * static path stays well-defined.
+     */
     fun addressFor(gen3: Boolean): IntArray = if (gen3 && addrGen3 != null) addrGen3 else address
 
     /** Map a wire value to its option index (for ENUM). */
@@ -102,6 +118,18 @@ object KatanaParams {
         "125Hz", "160Hz", "200Hz", "250Hz", "315Hz", "400Hz", "500Hz", "630Hz", "800Hz",
     )
 
+    // ---- Gen 3 banked-effect slot bases + selector offsets ---------------
+    // Section bases from the Katana Librarian `m` enum; selector offsets are the
+    // byte position inside the COLOR block (20 00 04 00, size 5). An effect's
+    // real Gen 3 address depends on which physical slot it currently occupies.
+    private val BOOSTER_SLOTS = intArrayOf(2560, 3072, 3584)   // BOOSTER(1/2/3)
+    private val DELAY_SLOTS = intArrayOf(10240, 10752, 11264)  // DELAY(1/2/3)
+    private val REVERB_SLOTS = intArrayOf(13312, 13824, 14336) // REVERB(1/2/3)
+    const val SEL_FX1A = 0   // booster selector byte offset in COLOR block
+    const val SEL_FX2A = 3   // delay selector
+    const val SEL_FX3 = 4    // reverb selector
+    const val GEN3_SELECTOR_COUNT = 5
+
     // ---- Sections --------------------------------------------------------
     private const val AMP = "Усилитель"
     private const val BOOST = "Booster"
@@ -125,14 +153,22 @@ object KatanaParams {
     // ---- Booster (60 00 00 30); Gen 3 on/off in section SW ---------------
     val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30),
         g3 = a(0x20, 0x00, 0x08, 0x00))
-    val BOOST_TYPE = enum("boost_type", "Тип", BOOST, a(0x60, 0x00, 0x00, 0x31), BOOSTER)
-    val BOOST_DRIVE = cont("boost_drive", "Drive", BOOST, a(0x60, 0x00, 0x00, 0x32))
-    val BOOST_BOTTOM = cont("boost_bottom", "Bottom", BOOST, a(0x60, 0x00, 0x00, 0x33))
-    val BOOST_TONE = cont("boost_tone", "Tone", BOOST, a(0x60, 0x00, 0x00, 0x34))
-    val BOOST_SOLO = toggle("boost_solo", "Solo", BOOST, a(0x60, 0x00, 0x00, 0x35))
-    val BOOST_SOLO_LVL = cont("boost_solo_lvl", "Solo Level", BOOST, a(0x60, 0x00, 0x00, 0x36))
-    val BOOST_LEVEL = cont("boost_level", "Effect Level", BOOST, a(0x60, 0x00, 0x00, 0x37))
-    val BOOST_DIRECT = cont("boost_direct", "Direct Mix", BOOST, a(0x60, 0x00, 0x00, 0x38))
+    val BOOST_TYPE = enum("boost_type", "Тип", BOOST, a(0x60, 0x00, 0x00, 0x31), BOOSTER,
+        slots = BOOSTER_SLOTS, gi = 0, sel = SEL_FX1A)
+    val BOOST_DRIVE = cont("boost_drive", "Drive", BOOST, a(0x60, 0x00, 0x00, 0x32),
+        slots = BOOSTER_SLOTS, gi = 1, sel = SEL_FX1A)
+    val BOOST_BOTTOM = cont("boost_bottom", "Bottom", BOOST, a(0x60, 0x00, 0x00, 0x33),
+        slots = BOOSTER_SLOTS, gi = 2, sel = SEL_FX1A)
+    val BOOST_TONE = cont("boost_tone", "Tone", BOOST, a(0x60, 0x00, 0x00, 0x34),
+        slots = BOOSTER_SLOTS, gi = 3, sel = SEL_FX1A)
+    val BOOST_SOLO = toggle("boost_solo", "Solo", BOOST, a(0x60, 0x00, 0x00, 0x35),
+        slots = BOOSTER_SLOTS, gi = 4, sel = SEL_FX1A)
+    val BOOST_SOLO_LVL = cont("boost_solo_lvl", "Solo Level", BOOST, a(0x60, 0x00, 0x00, 0x36),
+        slots = BOOSTER_SLOTS, gi = 5, sel = SEL_FX1A)
+    val BOOST_LEVEL = cont("boost_level", "Effect Level", BOOST, a(0x60, 0x00, 0x00, 0x37),
+        slots = BOOSTER_SLOTS, gi = 6, sel = SEL_FX1A)
+    val BOOST_DIRECT = cont("boost_direct", "Direct Mix", BOOST, a(0x60, 0x00, 0x00, 0x38),
+        slots = BOOSTER_SLOTS, gi = 7, sel = SEL_FX1A)
 
     // ---- Mod (60 00 01 40) — type + on/off (per-type params via Console) --
     val MOD_SW = toggle("mod_sw", "Mod", MOD, a(0x60, 0x00, 0x01, 0x40),
@@ -147,40 +183,52 @@ object KatanaParams {
     // ---- Delay (60 00 05 60) --------------------------------------------
     val DELAY_SW = toggle("delay_sw", "Delay", DLY, a(0x60, 0x00, 0x05, 0x60),
         g3 = a(0x20, 0x00, 0x08, 0x03))
-    val DELAY_TYPE = enum("delay_type", "Тип", DLY, a(0x60, 0x00, 0x05, 0x61), DELAY)
+    val DELAY_TYPE = enum("delay_type", "Тип", DLY, a(0x60, 0x00, 0x05, 0x61), DELAY,
+        slots = DELAY_SLOTS, gi = 0, sel = SEL_FX2A)
     val DELAY_TIME = KatanaParam(
         "delay_time", "Time (ms)", DLY, a(0x60, 0x00, 0x05, 0x62), ParamKind.CONTINUOUS,
         min = 1, max = 2000, default = 400, word = true, verified = true,
+        gen3Slots = DELAY_SLOTS, gen3Index = 1, gen3Sel = SEL_FX2A,
     )
-    val DELAY_FEEDBACK = cont("delay_fb", "Feedback", DLY, a(0x60, 0x00, 0x05, 0x64))
+    val DELAY_FEEDBACK = cont("delay_fb", "Feedback", DLY, a(0x60, 0x00, 0x05, 0x64),
+        slots = DELAY_SLOTS, gi = 5, sel = SEL_FX2A)
     val DELAY_HIGHCUT = enum("delay_hc", "High Cut", DLY, a(0x60, 0x00, 0x05, 0x65),
-        HIGH_CUT.mapIndexed { i, s -> s to i })
-    val DELAY_LEVEL = cont("delay_level", "Effect Level", DLY, a(0x60, 0x00, 0x05, 0x66))
-    val DELAY_DIRECT = cont("delay_direct", "Direct Mix", DLY, a(0x60, 0x00, 0x05, 0x67))
+        HIGH_CUT.mapIndexed { i, s -> s to i }, slots = DELAY_SLOTS, gi = 6, sel = SEL_FX2A)
+    val DELAY_LEVEL = cont("delay_level", "Effect Level", DLY, a(0x60, 0x00, 0x05, 0x66),
+        slots = DELAY_SLOTS, gi = 7, sel = SEL_FX2A)
+    val DELAY_DIRECT = cont("delay_direct", "Direct Mix", DLY, a(0x60, 0x00, 0x05, 0x67),
+        slots = DELAY_SLOTS, gi = 8, sel = SEL_FX2A)
 
     // ---- Reverb (60 00 06 10) -------------------------------------------
     val REVERB_SW = toggle("reverb_sw", "Reverb", REV, a(0x60, 0x00, 0x06, 0x10),
         g3 = a(0x20, 0x00, 0x08, 0x05))
-    val REVERB_TYPE = enum("reverb_type", "Тип", REV, a(0x60, 0x00, 0x06, 0x11), REVERB)
-    val REVERB_TIME = cont("reverb_time", "Time", REV, a(0x60, 0x00, 0x06, 0x12), max = 99)
+    val REVERB_TYPE = enum("reverb_type", "Тип", REV, a(0x60, 0x00, 0x06, 0x11), REVERB,
+        slots = REVERB_SLOTS, gi = 0, sel = SEL_FX3)
+    val REVERB_TIME = cont("reverb_time", "Time", REV, a(0x60, 0x00, 0x06, 0x12), max = 99,
+        slots = REVERB_SLOTS, gi = 2, sel = SEL_FX3)
     val REVERB_PREDELAY = KatanaParam(
         "reverb_pre", "Pre-Delay (ms)", REV, a(0x60, 0x00, 0x06, 0x13), ParamKind.CONTINUOUS,
         min = 0, max = 500, default = 0, word = true, verified = true,
+        gen3Slots = REVERB_SLOTS, gen3Index = 3, gen3Sel = SEL_FX3,
     )
     val REVERB_LOWCUT = enum("reverb_lc", "Low Cut", REV, a(0x60, 0x00, 0x06, 0x15),
-        LOW_CUT.mapIndexed { i, s -> s to i })
+        LOW_CUT.mapIndexed { i, s -> s to i }, slots = REVERB_SLOTS, gi = 7, sel = SEL_FX3)
     val REVERB_HIGHCUT = enum("reverb_hc", "High Cut", REV, a(0x60, 0x00, 0x06, 0x16),
-        HIGH_CUT.mapIndexed { i, s -> s to i })
+        HIGH_CUT.mapIndexed { i, s -> s to i }, slots = REVERB_SLOTS, gi = 8, sel = SEL_FX3)
     val REVERB_DENSITY = cont("reverb_density", "Density", REV, a(0x60, 0x00, 0x06, 0x17))
-    val REVERB_LEVEL = cont("reverb_level", "Effect Level", REV, a(0x60, 0x00, 0x06, 0x18))
-    val REVERB_DIRECT = cont("reverb_direct", "Direct Mix", REV, a(0x60, 0x00, 0x06, 0x19))
+    val REVERB_LEVEL = cont("reverb_level", "Effect Level", REV, a(0x60, 0x00, 0x06, 0x18),
+        slots = REVERB_SLOTS, gi = 10, sel = SEL_FX3)
+    val REVERB_DIRECT = cont("reverb_direct", "Direct Mix", REV, a(0x60, 0x00, 0x06, 0x19),
+        slots = REVERB_SLOTS, gi = 11, sel = SEL_FX3)
     val REVERB_SPRING = cont("reverb_spring", "Spring Sens", REV, a(0x60, 0x00, 0x06, 0x1A))
 
-    // ---- Noise Suppressor (60 00 06 63) ---------------------------------
+    // ---- Noise Suppressor (60 00 06 63); Gen 3 NS section base 22528 -----
     val NS_SW = toggle("ns_sw", "Noise Suppressor", NS, a(0x60, 0x00, 0x06, 0x63),
         g3 = a(0x20, 0x00, 0x58, 0x00))
-    val NS_THRESHOLD = cont("ns_thr", "Threshold", NS, a(0x60, 0x00, 0x06, 0x64))
-    val NS_RELEASE = cont("ns_rel", "Release", NS, a(0x60, 0x00, 0x06, 0x65))
+    val NS_THRESHOLD = cont("ns_thr", "Threshold", NS, a(0x60, 0x00, 0x06, 0x64),
+        g3 = a(0x20, 0x00, 0x58, 0x01))
+    val NS_RELEASE = cont("ns_rel", "Release", NS, a(0x60, 0x00, 0x06, 0x65),
+        g3 = a(0x20, 0x00, 0x58, 0x02))
 
     val ALL: List<KatanaParam> = listOf(
         AMP_TYPE, GAIN, VOLUME, BASS, MIDDLE, TREBLE, PRESENCE,
@@ -234,6 +282,9 @@ object KatanaParams {
         ReadRange(a(0x20, 0x00, 0x06, 0x00), 16),
         ReadRange(a(0x20, 0x00, 0x08, 0x00), 16),
         ReadRange(a(0x20, 0x00, 0x58, 0x00), 4),
+        // FX-BOX selector bytes (COLOR block): tells which physical slot each
+        // effect occupies, so banked effect params resolve to the right address.
+        ReadRange(a(0x20, 0x00, 0x04, 0x00), GEN3_SELECTOR_COUNT),
     )
 
     val READ_RANGES = listOf(
@@ -246,22 +297,30 @@ object KatanaParams {
         ReadRange(a(0x60, 0x00, 0x06, 0x63), 0x03),   // noise suppressor
     )
 
+    /** COLOR block that holds the 5 FX-BOX selector bytes. */
+    val GEN3_SELECTOR_ADDR = a(0x20, 0x00, 0x04, 0x00)
+
     // ---- helpers ---------------------------------------------------------
     private fun a(b0: Int, b1: Int, b2: Int, b3: Int) = intArrayOf(b0, b1, b2, b3)
 
     private fun cont(id: String, label: String, cat: String, addr: IntArray,
-                     max: Int = 100, verified: Boolean = true, g3: IntArray? = null) =
+                     max: Int = 100, verified: Boolean = true, g3: IntArray? = null,
+                     slots: IntArray? = null, gi: Int = 0, sel: Int = -1) =
         KatanaParam(id, label, cat, addr, ParamKind.CONTINUOUS, max = max,
-            verified = verified, addrGen3 = g3)
+            verified = verified, addrGen3 = g3, gen3Slots = slots, gen3Index = gi, gen3Sel = sel)
 
-    private fun toggle(id: String, label: String, cat: String, addr: IntArray, g3: IntArray? = null) =
-        KatanaParam(id, label, cat, addr, ParamKind.TOGGLE, max = 1, verified = true, addrGen3 = g3)
+    private fun toggle(id: String, label: String, cat: String, addr: IntArray, g3: IntArray? = null,
+                       slots: IntArray? = null, gi: Int = 0, sel: Int = -1) =
+        KatanaParam(id, label, cat, addr, ParamKind.TOGGLE, max = 1, verified = true,
+            addrGen3 = g3, gen3Slots = slots, gen3Index = gi, gen3Sel = sel)
 
     private fun enum(id: String, label: String, cat: String, addr: IntArray,
-                     items: List<Pair<String, Int>>, verified: Boolean = true, g3: IntArray? = null) =
+                     items: List<Pair<String, Int>>, verified: Boolean = true, g3: IntArray? = null,
+                     slots: IntArray? = null, gi: Int = 0, sel: Int = -1) =
         KatanaParam(
             id, label, cat, addr, ParamKind.ENUM,
             addrGen3 = g3,
+            gen3Slots = slots, gen3Index = gi, gen3Sel = sel,
             max = items.size - 1,
             options = items.map { it.first },
             optionValues = items.map { it.second },

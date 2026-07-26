@@ -23,6 +23,13 @@ class KatanaController(private val connection: UsbMidiConnection) {
 
     @Volatile private var headerLearned = false
 
+    /**
+     * Live cache of the 5 Gen 3 FX-BOX selector bytes (COLOR block, 20 00 04 00),
+     * which decide the physical slot each banked effect occupies. Updated from
+     * inbound data; used to resolve banked effect-param addresses.
+     */
+    private val gen3Selectors = IntArray(KatanaParams.GEN3_SELECTOR_COUNT)
+
     private val sender = Executors.newSingleThreadExecutor { r ->
         Thread(r, "katana-sender").apply { isDaemon = true }
     }
@@ -45,7 +52,36 @@ class KatanaController(private val connection: UsbMidiConnection) {
             onInfo?.invoke("✓ Заголовок из ответа: ${KatanaSysEx.headerHex()}")
         }
         KatanaSysEx.parseIdentityReply(sysex)?.let { onIdentity?.invoke(it) }
-        KatanaSysEx.parse(sysex)?.let { onIncoming?.invoke(it) }
+        KatanaSysEx.parse(sysex)?.let { inc ->
+            captureSelectors(inc)
+            onIncoming?.invoke(inc)
+        }
+    }
+
+    /** If a frame carries the COLOR block (20 00 04 0x), cache the selector bytes. */
+    private fun captureSelectors(inc: KatanaSysEx.Incoming) {
+        val a = inc.address
+        if (a.size == 4 && a[0] == 0x20 && a[1] == 0x00 && a[2] == 0x04) {
+            val start = a[3]
+            for (i in inc.data.indices) {
+                val slot = start + i
+                if (slot in gen3Selectors.indices) gen3Selectors[slot] = inc.data[i] and 0x7F
+            }
+        }
+    }
+
+    /**
+     * The wire address to use for [param] right now. Banked Gen 3 effect params
+     * resolve through the live selector cache; everything else is static.
+     */
+    fun resolveAddress(param: KatanaParam): IntArray {
+        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
+        val slots = param.gen3Slots
+        if (gen3 && slots != null && param.gen3Sel in gen3Selectors.indices) {
+            val slot = gen3Selectors[param.gen3Sel].coerceIn(0, slots.size - 1)
+            return KatanaSysEx.gen3AddrFromBase(slots[slot], param.gen3Index)
+        }
+        return param.addressFor(gen3)
     }
 
     /** Connect: identity request (→ dialect), announce, editor mode, read tone. */
@@ -108,8 +144,7 @@ class KatanaController(private val connection: UsbMidiConnection) {
         } else {
             intArrayOf(v and 0x7F)
         }
-        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
-        enqueue(KatanaSysEx.buildSet(param.addressFor(gen3), data), settleMs = 4)
+        enqueue(KatanaSysEx.buildSet(resolveAddress(param), data), settleMs = 4)
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */
