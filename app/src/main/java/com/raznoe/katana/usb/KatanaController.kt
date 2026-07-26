@@ -139,16 +139,17 @@ class KatanaController(private val connection: UsbMidiConnection) {
         }
     }
 
-    fun setParam(param: KatanaParam, value: Int) {
+    private fun encode(param: KatanaParam, value: Int): IntArray {
         // ENUM wire values can have gaps (e.g. Chorus == 29 while max index is
         // smaller), so only clamp continuous/toggle params.
         val v = if (param.kind == ParamKind.ENUM) value and 0x7F
         else value.coerceIn(param.min, param.max)
-        val data = if (param.word) {
-            intArrayOf((v shr 7) and 0x7F, v and 0x7F)
-        } else {
-            intArrayOf(v and 0x7F)
-        }
+        return if (param.word) intArrayOf((v shr 7) and 0x7F, v and 0x7F) else intArrayOf(v and 0x7F)
+    }
+
+    /** Interactive single-knob write: robust ×3 across banked slots. */
+    fun setParam(param: KatanaParam, value: Int) {
+        val data = encode(param, value)
         val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
         val slots = param.gen3Slots
         if (gen3 && slots != null) {
@@ -163,6 +164,17 @@ class KatanaController(private val connection: UsbMidiConnection) {
         } else {
             enqueue(KatanaSysEx.buildSet(resolveAddress(param), data), settleMs = 4)
         }
+    }
+
+    /**
+     * Batch write for loading a whole preset: one message per param to the
+     * ACTIVE slot only (via the selector cache read on connect), paced a little
+     * slower. A full preset otherwise emits ~80+ messages (banked params ×3),
+     * which overruns the amp's MIDI buffer — only the first patch or two land.
+     * Single-slot + pacing keeps the whole patch reliable.
+     */
+    fun applyParam(param: KatanaParam, value: Int) {
+        enqueue(KatanaSysEx.buildSet(resolveAddress(param), encode(param, value)), settleMs = 12)
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */

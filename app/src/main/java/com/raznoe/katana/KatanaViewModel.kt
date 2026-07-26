@@ -406,12 +406,21 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun applyPatch(patch: Patch) {
+        val ctl = controller
+        var sent = 0
         patch.values.forEach { (id, value) ->
-            KatanaParams.BY_ID[id]?.let { setParam(it, value) }
+            val param = KatanaParams.BY_ID[id] ?: return@forEach
+            val stored = if (param.kind == ParamKind.ENUM) value else value.coerceIn(param.min, param.max)
+            paramValues[param.id] = stored
+            // Paced single-slot batch write — avoids flooding the amp's MIDI
+            // buffer (which made only the first 1–2 presets land).
+            ctl?.applyParam(param, stored)
+            sent++
         }
         activePreset = patch.name
-        appendLog("— применён пресет '${patch.name}' —")
-        logAction("", "Пресет загружен: ${patch.name}  ${if (controller == null) "(нет связи)" else "(отправлен)"}")
+        appendLog("— применён пресет '${patch.name}' ($sent параметров) —")
+        logAction("", "Пресет загружен: ${patch.name}  " +
+            "${if (ctl == null) "(нет связи)" else "(отправлено $sent параметров)"}")
     }
 
     fun deletePatch(name: String) {
