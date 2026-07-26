@@ -123,9 +123,13 @@ object KatanaParams {
     // byte position inside the COLOR block (20 00 04 00, size 5). An effect's
     // real Gen 3 address depends on which physical slot it currently occupies.
     private val BOOSTER_SLOTS = intArrayOf(2560, 3072, 3584)   // BOOSTER(1/2/3)
+    private val FX1_SLOTS = intArrayOf(4096, 4608, 5120)       // FX(1/2/3)  — Mod box
+    private val FX2_SLOTS = intArrayOf(5632, 6144, 6656)       // FX(4/5/6)  — FX box
     private val DELAY_SLOTS = intArrayOf(10240, 10752, 11264)  // DELAY(1/2/3)
     private val REVERB_SLOTS = intArrayOf(13312, 13824, 14336) // REVERB(1/2/3)
     const val SEL_FX1A = 0   // booster selector byte offset in COLOR block
+    const val SEL_FX1B = 1   // Mod (FX1) box selector
+    const val SEL_FX2B = 2   // FX (FX2) box selector
     const val SEL_FX2A = 3   // delay selector
     const val SEL_FX3 = 4    // reverb selector
     const val GEN3_SELECTOR_COUNT = 5
@@ -173,12 +177,14 @@ object KatanaParams {
     // ---- Mod (60 00 01 40) — type + on/off (per-type params via Console) --
     val MOD_SW = toggle("mod_sw", "Mod", MOD, a(0x60, 0x00, 0x01, 0x40),
         g3 = a(0x20, 0x00, 0x08, 0x01))
-    val MOD_TYPE = enum("mod_type", "Тип", MOD, a(0x60, 0x00, 0x01, 0x41), MOD_FX)
+    val MOD_TYPE = enum("mod_type", "Тип", MOD, a(0x60, 0x00, 0x01, 0x41), MOD_FX,
+        slots = FX1_SLOTS, gi = 0, sel = SEL_FX1B, verified = false)
 
     // ---- FX (60 00 03 4C) ------------------------------------------------
     val FX_SW = toggle("fx_sw", "FX", FX, a(0x60, 0x00, 0x03, 0x4C),
         g3 = a(0x20, 0x00, 0x08, 0x02))
-    val FX_TYPE = enum("fx_type", "Тип", FX, a(0x60, 0x00, 0x03, 0x4D), MOD_FX)
+    val FX_TYPE = enum("fx_type", "Тип", FX, a(0x60, 0x00, 0x03, 0x4D), MOD_FX,
+        slots = FX2_SLOTS, gi = 0, sel = SEL_FX2B, verified = false)
 
     // ---- Delay (60 00 05 60) --------------------------------------------
     val DELAY_SW = toggle("delay_sw", "Delay", DLY, a(0x60, 0x00, 0x05, 0x60),
