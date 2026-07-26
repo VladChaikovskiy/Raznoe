@@ -390,7 +390,7 @@ private fun JamScreen(vm: KatanaViewModel) {
             Text("Минусовка (MP3): ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
             Slider(
                 value = vm.mp3Volume,
-                onValueChange = { vm.setMp3Volume(it) },
+                onValueChange = { vm.changeMp3Volume(it) },
                 valueRange = 0f..1f,
             )
             val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0

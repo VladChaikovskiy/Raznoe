@@ -331,7 +331,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         logAction("", "Джем: добавлен трек «$name»")
     }
 
-    fun setMp3Volume(v: Float) {
+    fun changeMp3Volume(v: Float) {
         mp3Volume = v.coerceIn(0f, 1f)
         runCatching { player?.setVolume(mp3Volume, mp3Volume) }
     }
