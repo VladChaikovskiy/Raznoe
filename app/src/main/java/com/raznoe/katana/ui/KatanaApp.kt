@@ -69,9 +69,10 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (screen) {
                 0 -> PatchScreen(vm, onConnectRequest)
-                1 -> PresetsScreen(vm)
-                2 -> JamScreen(vm)
-                3 -> LibraryScreen(vm)
+                1 -> TogglesScreen(vm)
+                2 -> PresetsScreen(vm)
+                3 -> JamScreen(vm)
+                4 -> LibraryScreen(vm)
                 else -> ConsoleScreen(vm)
             }
         }
@@ -81,10 +82,12 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("Патч", "Пресеты", "Джем", "Библиотека", "Консоль")
+    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека", "Консоль")
     Row(
-        Modifier.fillMaxWidth().background(Nux.Panel).padding(vertical = 10.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        Modifier.fillMaxWidth().background(Nux.Panel)
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 10.dp, horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         items.forEachIndexed { i, label ->
             val c = if (i == selected) Nux.Orange else Nux.TextLo
@@ -265,6 +268,39 @@ private fun ConnectionStrip(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -
         }
     }
 }
+
+@Composable
+private fun TogglesScreen(vm: KatanaViewModel) {
+    val toggles = KatanaParams.ALL.filter { it.kind == ParamKind.TOGGLE }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Text("Тумблеры", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+            "Все переключатели вкл/выкл в одном месте (блоки эффектов, Solo, Noise Suppressor).",
+            color = Nux.TextLo, fontSize = 12.sp,
+        )
+        Panel {
+            toggles.forEach { p ->
+                val on = (vm.paramValues[p.id] ?: 0) != 0
+                val accent = blockColorFor(p.category)
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.label + mark(p), color = Nux.TextHi)
+                        Text(p.category, color = Nux.TextLo, fontSize = 11.sp)
+                    }
+                    OnOffPills(on, accent) { vm.setParam(p, if (it) 1 else 0) }
+                }
+            }
+        }
+    }
+}
+
+private fun blockColorFor(category: String): Color = CHAIN.firstOrNull { it.key == category }?.color ?: Nux.Orange
 
 @Composable
 private fun PresetsScreen(vm: KatanaViewModel) {

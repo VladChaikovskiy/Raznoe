@@ -122,8 +122,9 @@ object KatanaParams {
     val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x04))
     val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), g3 = a(0x20, 0x00, 0x06, 0x05))
 
-    // ---- Booster (60 00 00 30) ------------------------------------------
-    val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30))
+    // ---- Booster (60 00 00 30); Gen 3 on/off in section SW ---------------
+    val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30),
+        g3 = a(0x20, 0x00, 0x08, 0x00))
     val BOOST_TYPE = enum("boost_type", "Тип", BOOST, a(0x60, 0x00, 0x00, 0x31), BOOSTER)
     val BOOST_DRIVE = cont("boost_drive", "Drive", BOOST, a(0x60, 0x00, 0x00, 0x32))
     val BOOST_BOTTOM = cont("boost_bottom", "Bottom", BOOST, a(0x60, 0x00, 0x00, 0x33))
@@ -134,15 +135,18 @@ object KatanaParams {
     val BOOST_DIRECT = cont("boost_direct", "Direct Mix", BOOST, a(0x60, 0x00, 0x00, 0x38))
 
     // ---- Mod (60 00 01 40) — type + on/off (per-type params via Console) --
-    val MOD_SW = toggle("mod_sw", "Mod", MOD, a(0x60, 0x00, 0x01, 0x40))
+    val MOD_SW = toggle("mod_sw", "Mod", MOD, a(0x60, 0x00, 0x01, 0x40),
+        g3 = a(0x20, 0x00, 0x08, 0x01))
     val MOD_TYPE = enum("mod_type", "Тип", MOD, a(0x60, 0x00, 0x01, 0x41), MOD_FX)
 
     // ---- FX (60 00 03 4C) ------------------------------------------------
-    val FX_SW = toggle("fx_sw", "FX", FX, a(0x60, 0x00, 0x03, 0x4C))
+    val FX_SW = toggle("fx_sw", "FX", FX, a(0x60, 0x00, 0x03, 0x4C),
+        g3 = a(0x20, 0x00, 0x08, 0x02))
     val FX_TYPE = enum("fx_type", "Тип", FX, a(0x60, 0x00, 0x03, 0x4D), MOD_FX)
 
     // ---- Delay (60 00 05 60) --------------------------------------------
-    val DELAY_SW = toggle("delay_sw", "Delay", DLY, a(0x60, 0x00, 0x05, 0x60))
+    val DELAY_SW = toggle("delay_sw", "Delay", DLY, a(0x60, 0x00, 0x05, 0x60),
+        g3 = a(0x20, 0x00, 0x08, 0x03))
     val DELAY_TYPE = enum("delay_type", "Тип", DLY, a(0x60, 0x00, 0x05, 0x61), DELAY)
     val DELAY_TIME = KatanaParam(
         "delay_time", "Time (ms)", DLY, a(0x60, 0x00, 0x05, 0x62), ParamKind.CONTINUOUS,
@@ -155,7 +159,8 @@ object KatanaParams {
     val DELAY_DIRECT = cont("delay_direct", "Direct Mix", DLY, a(0x60, 0x00, 0x05, 0x67))
 
     // ---- Reverb (60 00 06 10) -------------------------------------------
-    val REVERB_SW = toggle("reverb_sw", "Reverb", REV, a(0x60, 0x00, 0x06, 0x10))
+    val REVERB_SW = toggle("reverb_sw", "Reverb", REV, a(0x60, 0x00, 0x06, 0x10),
+        g3 = a(0x20, 0x00, 0x08, 0x05))
     val REVERB_TYPE = enum("reverb_type", "Тип", REV, a(0x60, 0x00, 0x06, 0x11), REVERB)
     val REVERB_TIME = cont("reverb_time", "Time", REV, a(0x60, 0x00, 0x06, 0x12), max = 99)
     val REVERB_PREDELAY = KatanaParam(
@@ -172,7 +177,8 @@ object KatanaParams {
     val REVERB_SPRING = cont("reverb_spring", "Spring Sens", REV, a(0x60, 0x00, 0x06, 0x1A))
 
     // ---- Noise Suppressor (60 00 06 63) ---------------------------------
-    val NS_SW = toggle("ns_sw", "Noise Suppressor", NS, a(0x60, 0x00, 0x06, 0x63))
+    val NS_SW = toggle("ns_sw", "Noise Suppressor", NS, a(0x60, 0x00, 0x06, 0x63),
+        g3 = a(0x20, 0x00, 0x58, 0x00))
     val NS_THRESHOLD = cont("ns_thr", "Threshold", NS, a(0x60, 0x00, 0x06, 0x64))
     val NS_RELEASE = cont("ns_rel", "Release", NS, a(0x60, 0x00, 0x06, 0x65))
 
