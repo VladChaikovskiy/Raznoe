@@ -390,18 +390,48 @@ private fun JamScreen(vm: KatanaViewModel) {
         Panel(accent = Nux.Pink) {
             Text("Куда играет минусовка", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Через комбик (USB)", selected = vm.jamThroughAmp, accent = Nux.Orange) {
+                Pill("Через комбик", selected = vm.jamThroughAmp, accent = Nux.Orange) {
                     vm.chooseJamOutput(true)
                 }
                 Pill("Через телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) {
                     vm.chooseJamOutput(false)
                 }
             }
+            val ampSeen = vm.ampAudioAvailable()
             Text(
-                "«Через комбик» — MP3 идёт в USB-аудио Katana и играет вместе с гитарой " +
-                    "из динамика комбика. Нужно, чтобы комбик был подключён по USB и телефон " +
-                    "его видел. Доступные выходы: ${vm.audioOutputs()}",
-                color = Nux.TextLo, fontSize = 11.sp,
+                if (ampSeen) "✓ Комбик виден как аудиоустройство — минусовка пойдёт в него."
+                else "✗ Комбик сейчас НЕ виден телефону как аудио. Так и должно быть в режиме " +
+                    "управления (MIDI). См. ниже, как вывести звук в комбик.",
+                color = if (ampSeen) Nux.TextHi else Nux.Pink, fontSize = 12.sp,
+            )
+            Text("Выходы: ${vm.audioOutputs()}", color = Nux.TextLo, fontSize = 11.sp)
+        }
+
+        Panel {
+            Text("Как вывести звук в комбик", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Важное ограничение Katana Gen 3: по одному USB-кабелю Android умеет ЛИБО " +
+                    "управлять комбиком (MIDI), ЛИБО принимать от телефона звук — но не одновременно. " +
+                    "Поэтому есть 3 способа:",
+                color = Nux.TextLo, fontSize = 12.sp,
+            )
+            Text(
+                "1) AUX-кабель (проще всего, работает сразу). 3.5-мм кабель из телефона в гнездо " +
+                    "AUX IN комбика. Минусовка играет через комбик, а приложение по USB продолжает " +
+                    "рулить тоном. Нужен разъём для наушников (или переходник на отдельный порт).",
+                color = Nux.TextLo, fontSize = 12.sp,
+            )
+            Text(
+                "2) USB Generic-режим. Включи комбик, удерживая [MOD] (не [BOOSTER]). Тогда телефон " +
+                    "увидит комбик как аудио и минусовка пойдёт по USB. НО управление тоном (MIDI) в " +
+                    "этом режиме не работает — либо джем, либо управление.",
+                color = Nux.TextLo, fontSize = 12.sp,
+            )
+            Text(
+                "3) BT-DUAL (адаптер Bluetooth от BOSS). Даёт и звук, и MIDI одновременно по " +
+                    "Bluetooth — это официальный способ Roland для телефона. Приложение направит " +
+                    "минусовку в него автоматически.",
+                color = Nux.TextLo, fontSize = 12.sp,
             )
         }
 

@@ -113,19 +113,30 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             .ifEmpty { "нет" }
     }
 
-    private fun usbOutput(): AudioDeviceInfo? {
+    /**
+     * The amp's audio output as Android sees it: USB audio (amp in Generic USB
+     * mode) or Bluetooth A2DP (BT-DUAL adaptor). In Vendor USB mode (power-on
+     * with [BOOSTER], needed for MIDI) the amp needs BOSS's proprietary driver,
+     * which Android does not have — so no USB-audio device appears and MP3 can
+     * only reach the amp via Generic mode, BT-DUAL, or the AUX IN jack.
+     */
+    private fun ampOutput(): AudioDeviceInfo? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
-        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+        val outs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return outs.firstOrNull {
             it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
                 it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
                 it.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
-        }
+        } ?: outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
     }
 
-    /** Force MP3 output to the amp's USB audio when requested and available. */
+    /** True if an amp audio route (USB or BT-DUAL) is available right now. */
+    fun ampAudioAvailable(): Boolean = ampOutput() != null
+
+    /** Force MP3 output to the amp's audio route when requested and available. */
     private fun applyPreferredOutput(mp: MediaPlayer) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val target = if (jamThroughAmp) usbOutput() else null
+        val target = if (jamThroughAmp) ampOutput() else null
         runCatching { mp.setPreferredDevice(target) }
     }
 
@@ -453,11 +464,11 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             p.start()
             applySpeed(p) // after start() — setting speed pre-start throws on some devices
             isPlaying = true
-            val usb = usbOutput()
+            val amp = ampOutput()
             val out = when {
-                jamThroughAmp && usb != null -> "комбик (USB)"
-                usb != null -> "динамик (комбик доступен — включи «через комбик»)"
-                else -> "динамик (USB-аудио комбика не найдено)"
+                jamThroughAmp && amp != null -> "комбик (${audioTypeName(amp.type)})"
+                amp != null -> "динамик (комбик доступен — включи «через комбик»)"
+                else -> "динамик · комбик не виден как аудио (нужен Generic-режим/BT-DUAL/AUX — см. «Как вывести звук в комбик»)"
             }
             jamStatus = "Играет: ${t.name} · $out"
             logAction("", "Джем: играет «${t.name}» (${durationMs / 1000}с, громкость ${(mp3Volume * 100).toInt()}%, выход: $out; все выходы: ${audioOutputs()})")
