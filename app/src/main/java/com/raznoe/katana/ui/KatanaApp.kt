@@ -418,26 +418,26 @@ private fun ConsoleScreen(vm: KatanaViewModel) {
         var testMsg by remember { mutableStateOf("") }
         DeviceTitle()
         Panel(accent = Nux.Pink) {
-            Text("Тест Gen 3 (экспериментальный диалект)", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text("Тест усилителя Gen 3", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Text(
-                "Жми и слушай комбик. Если Gain/Volume реально меняются — диалект угадан, " +
-                    "напиши мне, и я включу полноценный режим Gen 3.",
+                "Кнопки шлют реальные адреса Gen 3 (Gain/EQ). Жми и слушай комбик — " +
+                    "звук должен меняться. Это те же адреса, что и у ручек на вкладке «Патч».",
                 color = Nux.TextLo, fontSize = 12.sp,
             )
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Gain 100", selected = true, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x00, 100) }
-                Pill("Gain 0", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x00, 0) }
-                Pill("Vol 100", selected = true, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x01, 100) }
-                Pill("Vol 20", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x01, 20) }
+                Pill("Gain 100", selected = true, accent = Nux.Pink) { vm.setParam(KatanaParams.GAIN, 100); testMsg = "Gain → 100" }
+                Pill("Gain 0", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.GAIN, 0); testMsg = "Gain → 0" }
+                Pill("Vol 100", selected = true, accent = Nux.Pink) { vm.setParam(KatanaParams.VOLUME, 100); testMsg = "Volume → 100" }
+                Pill("Vol 20", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.VOLUME, 20); testMsg = "Volume → 20" }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Amp 0", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x0C, 0) }
-                Pill("Amp 3", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x0C, 3) }
-                Pill("Bass 100", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x03, 100) }
-                Pill("Treble 100", selected = false, accent = Nux.Pink) { testMsg = vm.sendNewGenAmp(0x05, 100) }
+                Pill("Bass 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.BASS, 100); testMsg = "Bass → 100" }
+                Pill("Bass 0", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.BASS, 0); testMsg = "Bass → 0" }
+                Pill("Treble 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.TREBLE, 100); testMsg = "Treble → 100" }
+                Pill("Mid 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.MIDDLE, 100); testMsg = "Middle → 100" }
             }
             if (testMsg.isNotEmpty()) {
-                Text(testMsg, color = Nux.TextHi, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Text(testMsg, color = Nux.TextHi, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             }
         }
         Panel {

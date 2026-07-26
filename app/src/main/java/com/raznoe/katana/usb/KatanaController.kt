@@ -108,7 +108,8 @@ class KatanaController(private val connection: UsbMidiConnection) {
         } else {
             intArrayOf(v and 0x7F)
         }
-        enqueue(KatanaSysEx.buildSet(param.address, data), settleMs = 4)
+        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
+        enqueue(KatanaSysEx.buildSet(param.addressFor(gen3), data), settleMs = 4)
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */

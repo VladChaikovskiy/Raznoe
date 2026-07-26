@@ -230,15 +230,17 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val data = incoming.data
         if (data.isEmpty()) return
         for (p in KatanaParams.ALL) {
-            if (p.address[0] != addr[0] || p.address[1] != addr[1] || p.address[2] != addr[2]) continue
-            val offset = p.address[3] - addr[3]
-            if (offset < 0 || offset >= data.size) continue
-            val value = if (p.word && offset + 1 < data.size) {
-                ((data[offset] and 0x7F) shl 7) or (data[offset + 1] and 0x7F)
-            } else {
-                data[offset] and 0x7F
+            // Match against both the MkII and Gen 3 address of the parameter.
+            for (pa in listOfNotNull(p.address, p.addrGen3)) {
+                if (pa[0] != addr[0] || pa[1] != addr[1] || pa[2] != addr[2]) continue
+                val offset = pa[3] - addr[3]
+                if (offset < 0 || offset >= data.size) continue
+                paramValues[p.id] = if (p.word && offset + 1 < data.size) {
+                    ((data[offset] and 0x7F) shl 7) or (data[offset + 1] and 0x7F)
+                } else {
+                    data[offset] and 0x7F
+                }
             }
-            paramValues[p.id] = value
         }
     }
 

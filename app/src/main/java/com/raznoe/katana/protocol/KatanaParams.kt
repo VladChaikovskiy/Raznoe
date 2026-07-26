@@ -35,9 +35,14 @@ data class KatanaParam(
     val word: Boolean = false,
     /** false => address not yet confirmed for Gen 3 (shows "(?)"). */
     val verified: Boolean = false,
+    /** Gen 3 wire address (decoded from Katana Librarian), if known. */
+    val addrGen3: IntArray? = null,
 ) {
     override fun equals(other: Any?) = other is KatanaParam && other.id == id
     override fun hashCode() = id.hashCode()
+
+    /** The wire address for a given generation (Gen 3 map where available). */
+    fun addressFor(gen3: Boolean): IntArray = if (gen3 && addrGen3 != null) addrGen3 else address
 
     /** Map a wire value to its option index (for ENUM). */
     fun indexOfValue(value: Int): Int {
@@ -106,15 +111,16 @@ object KatanaParams {
     private const val REV = "Reverb"
     private const val NS = "Noise Suppressor"
 
-    // ---- Amp panel (00 00 04 2x). Offsets provisional (0x20/0x21 ambiguity) --
+    // ---- Amp panel. MkII offsets provisional; Gen 3 addresses decoded from
+    //      the Katana Librarian app (section AMP, base 0x2000 06 xx). --------
     val AMP_TYPE = enum("amp_type", "Тип усилителя", AMP, a(0x00, 0x00, 0x04, 0x21),
-        AMP_TYPES.mapIndexed { i, s -> s to i }, verified = false)
-    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x22), verified = false)
-    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x23), verified = false)
-    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x24), verified = false)
-    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x25), verified = false)
-    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), verified = false)
-    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), verified = false)
+        AMP_TYPES.mapIndexed { i, s -> s to i }, g3 = a(0x20, 0x00, 0x06, 0x07))
+    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x22), g3 = a(0x20, 0x00, 0x06, 0x00))
+    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x23), g3 = a(0x20, 0x00, 0x06, 0x01))
+    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x24), g3 = a(0x20, 0x00, 0x06, 0x02))
+    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x25), g3 = a(0x20, 0x00, 0x06, 0x03))
+    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x04))
+    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), g3 = a(0x20, 0x00, 0x06, 0x05))
 
     // ---- Booster (60 00 00 30) ------------------------------------------
     val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30))
@@ -233,16 +239,18 @@ object KatanaParams {
     private fun a(b0: Int, b1: Int, b2: Int, b3: Int) = intArrayOf(b0, b1, b2, b3)
 
     private fun cont(id: String, label: String, cat: String, addr: IntArray,
-                     max: Int = 100, verified: Boolean = true) =
-        KatanaParam(id, label, cat, addr, ParamKind.CONTINUOUS, max = max, verified = verified)
+                     max: Int = 100, verified: Boolean = true, g3: IntArray? = null) =
+        KatanaParam(id, label, cat, addr, ParamKind.CONTINUOUS, max = max,
+            verified = verified, addrGen3 = g3)
 
-    private fun toggle(id: String, label: String, cat: String, addr: IntArray) =
-        KatanaParam(id, label, cat, addr, ParamKind.TOGGLE, max = 1, verified = true)
+    private fun toggle(id: String, label: String, cat: String, addr: IntArray, g3: IntArray? = null) =
+        KatanaParam(id, label, cat, addr, ParamKind.TOGGLE, max = 1, verified = true, addrGen3 = g3)
 
     private fun enum(id: String, label: String, cat: String, addr: IntArray,
-                     items: List<Pair<String, Int>>, verified: Boolean = true) =
+                     items: List<Pair<String, Int>>, verified: Boolean = true, g3: IntArray? = null) =
         KatanaParam(
             id, label, cat, addr, ParamKind.ENUM,
+            addrGen3 = g3,
             max = items.size - 1,
             options = items.map { it.first },
             optionValues = items.map { it.second },
