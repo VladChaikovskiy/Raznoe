@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Handler
@@ -81,6 +82,12 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     var looping by mutableStateOf(false)
         private set
     var speed by mutableStateOf(1.0f)
+        private set
+    var mp3Volume by mutableStateOf(0.8f)
+        private set
+    var jamStatus by mutableStateOf("")
+        private set
+    var activePreset by mutableStateOf("")
         private set
     private var player: MediaPlayer? = null
 
@@ -260,6 +267,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         patch.values.forEach { (id, value) ->
             KatanaParams.BY_ID[id]?.let { setParam(it, value) }
         }
+        activePreset = patch.name
         appendLog("— применён пресет '${patch.name}' —")
     }
 
@@ -279,7 +287,15 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         if (tracks.none { it.uri == uri.toString() }) {
             tracks.add(Track(uri.toString(), name))
             trackStore.saveAll(tracks.toList())
+            jamStatus = "Добавлен: $name"
+        } else {
+            jamStatus = "Уже в списке: $name"
         }
+    }
+
+    fun setMp3Volume(v: Float) {
+        mp3Volume = v.coerceIn(0f, 1f)
+        runCatching { player?.setVolume(mp3Volume, mp3Volume) }
     }
 
     fun removeTrack(index: Int) {
@@ -298,24 +314,40 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         // receiver is the MediaPlayer, whose read-only `isPlaying` would shadow
         // our own state property. Configure via an explicit local instead.
         val mp = MediaPlayer()
+        mp.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build(),
+        )
         mp.setOnPreparedListener { p ->
             durationMs = p.duration
-            applySpeed(p)
             p.isLooping = looping
+            runCatching { p.setVolume(mp3Volume, mp3Volume) }
             p.start()
+            applySpeed(p) // after start() — setting speed pre-start throws on some devices
             isPlaying = true
+            jamStatus = "Играет: ${t.name}"
         }
         mp.setOnCompletionListener {
             if (!looping) { isPlaying = false; positionMs = durationMs }
         }
-        mp.setOnErrorListener { _, _, _ -> isPlaying = false; true }
+        mp.setOnErrorListener { _, what, extra ->
+            isPlaying = false
+            jamStatus = "Ошибка воспроизведения ($what/$extra). Попробуй другой файл."
+            true
+        }
         player = mp
         currentTrack = index
         positionMs = 0
+        jamStatus = "Загрузка: ${t.name}…"
         runCatching {
             mp.setDataSource(app, Uri.parse(t.uri))
             mp.prepareAsync()
-        }.onFailure { isPlaying = false }
+        }.onFailure {
+            isPlaying = false
+            jamStatus = "Не удалось открыть файл: ${it.message}"
+        }
     }
 
     fun togglePlayPause() {

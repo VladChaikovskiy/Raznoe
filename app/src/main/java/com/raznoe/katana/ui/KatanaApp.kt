@@ -316,14 +316,21 @@ private fun PresetsScreen(vm: KatanaViewModel) {
             color = Nux.TextLo, fontSize = 12.sp,
         )
         FactoryPresets.ALL.forEach { p ->
-            Panel {
+            val active = vm.activePreset == p.name
+            Panel(accent = if (active) Nux.Gate else Nux.Stroke) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(p.name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            (if (active) "▶ " else "") + p.name,
+                            color = if (active) Nux.Gate else Nux.TextHi,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                         if (p.note.isNotEmpty()) Text(p.note, color = Nux.TextLo, fontSize = 11.sp)
                     }
-                    Pill("Загрузить", selected = true, accent = Nux.Orange) { vm.applyPatch(p) }
+                    Pill(if (active) "Активен" else "Загрузить", selected = active, accent = Nux.Orange) {
+                        vm.applyPatch(p)
+                    }
                 }
             }
         }
@@ -370,6 +377,30 @@ private fun JamScreen(vm: KatanaViewModel) {
                 Pill("Луп", selected = vm.looping, accent = Nux.Orange) { vm.toggleLoop() }
                 Pill("${vm.speed}x", selected = false, accent = Nux.Orange) { vm.cycleSpeed() }
             }
+            if (vm.jamStatus.isNotEmpty()) {
+                Text(vm.jamStatus, color = Nux.TextLo, fontSize = 12.sp)
+            }
+        }
+
+        Panel {
+            Text("Громкость", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text("Минусовка (MP3): ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
+            Slider(
+                value = vm.mp3Volume,
+                onValueChange = { vm.setMp3Volume(it) },
+                valueRange = 0f..1f,
+            )
+            val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
+            Text("Гитара (усилитель): $gv", color = Nux.TextLo, fontSize = 12.sp)
+            Slider(
+                value = gv.toFloat(),
+                onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
+                valueRange = 0f..100f,
+            )
+            Text(
+                "Минусовка играет через телефон, гитару регулирует громкость усилителя.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
         }
 
         Panel {

@@ -229,6 +229,11 @@ object KatanaParams {
         ReadRange(a(0x00, 0x00, 0x00, 0x00), 4),
         ReadRange(a(0x10, 0x00, 0x24, 0x00), 1),
         ReadRange(a(0x10, 0x00, 0x26, 0x00), 13),
+        // Live/edit area so the UI reflects the amp's current values and we can
+        // confirm which addresses are right: amp block, effect on/off, NS.
+        ReadRange(a(0x20, 0x00, 0x06, 0x00), 16),
+        ReadRange(a(0x20, 0x00, 0x08, 0x00), 16),
+        ReadRange(a(0x20, 0x00, 0x58, 0x00), 4),
     )
 
     val READ_RANGES = listOf(
