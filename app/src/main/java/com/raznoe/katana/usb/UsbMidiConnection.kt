@@ -30,6 +30,9 @@ class UsbMidiConnection(
     private var readerThread: Thread? = null
     private lateinit var reassembler: UsbMidiPacketizer.SysExReassembler
 
+    /** Invoked (on the reader thread) if the connection drops unexpectedly. */
+    var onDisconnect: (() -> Unit)? = null
+
     /** Human-readable description of what was found/claimed, for the on-screen log. */
     var diagnostics: String = ""
         private set
@@ -98,18 +101,24 @@ class UsbMidiConnection(
         val ep = endpointOut ?: return false
         val max = ep.maxPacketSize.coerceAtLeast(4)
         var offset = 0
-        while (offset < packets.size) {
-            val len = minOf(max, packets.size - offset)
-            val chunk = if (offset == 0 && len == packets.size) packets
-            else packets.copyOfRange(offset, offset + len)
-            val sent = conn.bulkTransfer(ep, chunk, len, WRITE_TIMEOUT_MS)
-            if (sent < 0) {
-                Log.w(TAG, "bulkTransfer(out) failed at offset $offset")
-                return false
+        return try {
+            while (offset < packets.size) {
+                val len = minOf(max, packets.size - offset)
+                val chunk = if (offset == 0 && len == packets.size) packets
+                else packets.copyOfRange(offset, offset + len)
+                val sent = conn.bulkTransfer(ep, chunk, len, WRITE_TIMEOUT_MS)
+                if (sent < 0) {
+                    Log.w(TAG, "bulkTransfer(out) failed at offset $offset")
+                    return false
+                }
+                offset += len
             }
-            offset += len
+            true
+        } catch (t: Throwable) {
+            // Device unplugged / USB glitch mid-write — never let it crash the app.
+            Log.w(TAG, "sendPackets failed: ${t.message}")
+            false
         }
-        return true
     }
 
     fun close() {
@@ -135,14 +144,27 @@ class UsbMidiConnection(
         val bufSize = ep.maxPacketSize.coerceAtLeast(64)
         readerThread = Thread({
             val buffer = ByteArray(bufSize)
-            while (running) {
-                val read = conn.bulkTransfer(ep, buffer, buffer.size, READ_TIMEOUT_MS)
-                if (read > 0) {
-                    reassembler.push(buffer, read)
-                } else if (read < 0) {
-                    // timeout is expected and returns a negative value; just loop
-                    if (!running) break
+            var crashed = false
+            try {
+                while (running) {
+                    val read = conn.bulkTransfer(ep, buffer, buffer.size, READ_TIMEOUT_MS)
+                    if (read > 0) {
+                        // A callback exception must not kill the reader thread.
+                        runCatching { reassembler.push(buffer, read) }
+                            .onFailure { Log.w(TAG, "inbound parse failed: ${it.message}") }
+                    } else if (read < 0) {
+                        // timeout is expected and returns a negative value; just loop
+                        if (!running) break
+                    }
                 }
+            } catch (t: Throwable) {
+                // Device unplugged / USB error — swallow so the process survives.
+                Log.w(TAG, "reader loop stopped: ${t.message}")
+                crashed = true
+            }
+            if (crashed && running) {
+                running = false
+                runCatching { onDisconnect?.invoke() }
             }
         }, "katana-usb-reader").also { it.isDaemon = true; it.start() }
     }

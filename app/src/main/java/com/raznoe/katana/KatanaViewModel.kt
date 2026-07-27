@@ -243,6 +243,15 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        conn.onDisconnect = {
+            onMain {
+                if (connected) {
+                    connected = false
+                    status = "Комбик отключён (проверь кабель)"
+                    appendLog("— соединение потеряно —")
+                }
+            }
+        }
         val error = conn.open(onSysEx = { sysex -> ctl.handleInbound(sysex) })
         if (error != null) {
             status = "Не удалось подключиться: $error"
@@ -519,7 +528,10 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     fun togglePlayPause() {
         val mp = player
         if (mp == null) { currentTrack?.let { playTrack(it) } ?: tracks.indices.firstOrNull()?.let { playTrack(it) }; return }
-        if (mp.isPlaying) { mp.pause(); isPlaying = false } else { mp.start(); isPlaying = true }
+        // MediaPlayer throws IllegalStateException if called in a bad state.
+        runCatching {
+            if (mp.isPlaying) { mp.pause(); isPlaying = false } else { mp.start(); isPlaying = true }
+        }
     }
 
     fun stopPlayback() {
@@ -527,22 +539,22 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun seekTo(ms: Int) {
-        player?.seekTo(ms.coerceIn(0, durationMs)); positionMs = ms
+        runCatching { player?.seekTo(ms.coerceIn(0, durationMs)); positionMs = ms }
     }
 
     fun toggleLoop() {
-        looping = !looping; player?.isLooping = looping
+        looping = !looping; runCatching { player?.isLooping = looping }
     }
 
     fun cycleSpeed() {
         speed = when (speed) { 1.0f -> 0.75f; 0.75f -> 0.5f; 0.5f -> 1.25f; else -> 1.0f }
         val mp = player ?: return
-        if (mp.isPlaying) applySpeed(mp)
+        runCatching { if (mp.isPlaying) applySpeed(mp) }
     }
 
     /** Called from the UI to refresh the seek position while playing. */
     fun refreshPosition() {
-        player?.let { if (it.isPlaying) positionMs = it.currentPosition }
+        runCatching { player?.let { if (it.isPlaying) positionMs = it.currentPosition } }
     }
 
     private fun applySpeed(mp: MediaPlayer) {

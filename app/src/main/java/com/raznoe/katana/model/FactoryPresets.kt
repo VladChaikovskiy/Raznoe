@@ -48,12 +48,31 @@ object FactoryPresets {
 
     private fun preset(name: String, note: String, build: Builder.() -> Unit): Patch {
         val b = Builder(); b.build()
+        cleanUp(b.v)
         // Loudness leveling: hotter tones (high gain / boost) put out much more
         // signal, so we trim the amp Level per preset to roughly equalize how
         // loud each preset sounds. This is an approximation, not metered LUFS —
         // fine-tune Volume on the Патч tab if a tone is still off.
         b.v["volume"] = normalizedLevel(b.v)
         return Patch(name = name, values = b.v, note = note)
+    }
+
+    /**
+     * Tame hiss/mush on overdriven presets: (1) engage the Noise Suppressor with
+     * a threshold scaled to how hot the tone is, and (2) trim runaway gain a bit.
+     * High-gain amps without a gate sound "dirty/noisy" — this cleans them up
+     * while leaving clean/low-gain presets untouched.
+     */
+    private fun cleanUp(v: LinkedHashMap<String, Int>) {
+        val gain = v["gain"] ?: 0
+        val boosted = (v["boost_sw"] ?: 0) == 1
+        // Trim only the most extreme gain so tones stay tight, not fizzy.
+        if (gain > 82) v["gain"] = 82
+        val g = v["gain"] ?: gain
+        if ((v["ns_sw"] ?: 0) != 1 && (g >= 40 || boosted)) {
+            v["ns_sw"] = 1
+            v["ns_thr"] = (16 + (g - 40) * 6 / 10).coerceIn(16, 60)
+        }
     }
 
     /** Approximate equal-loudness amp Level from gain + boost drive/level. */
