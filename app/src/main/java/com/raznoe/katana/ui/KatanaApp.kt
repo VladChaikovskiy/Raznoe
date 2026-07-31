@@ -74,9 +74,7 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
                 1 -> TogglesScreen(vm)
                 2 -> PresetsScreen(vm)
                 3 -> JamScreen(vm)
-                4 -> LibraryScreen(vm)
-                5 -> LogScreen(vm)
-                else -> ConsoleScreen(vm)
+                else -> LibraryScreen(vm)
             }
         }
         BottomNav(screen) { screen = it }
@@ -85,7 +83,7 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека", "Лог", "Консоль")
+    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека")
     Row(
         Modifier.fillMaxWidth().background(Nux.Panel)
             .horizontalScroll(rememberScrollState())
@@ -351,20 +349,21 @@ private fun JamScreen(vm: KatanaViewModel) {
         while (vm.isPlaying) { vm.refreshPosition(); delay(400) }
     }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DeviceTitle()
-        Text("Джем — минусовки", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text(
-            "Треки играют через динамик/выход телефона — играй под них на гитаре через комбик.",
-            color = Nux.TextLo, fontSize = 12.sp,
-        )
+        // Header + add button
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Джем", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Pill("+ MP3", selected = true, accent = Nux.Orange) { picker.launch(arrayOf("audio/*")) }
+        }
 
+        // Now playing: name, seek, transport with Play/Pause/Stop
         Panel(accent = Nux.Orange) {
             val idx = vm.currentTrack
             val name = idx?.let { vm.tracks.getOrNull(it)?.name } ?: "Ничего не выбрано"
-            Text(name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            Text(name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold, maxLines = 1, fontSize = 13.sp)
             val dur = if (vm.durationMs > 0) vm.durationMs else 1
             Slider(
                 value = vm.positionMs.coerceIn(0, dur).toFloat(),
@@ -372,123 +371,62 @@ private fun JamScreen(vm: KatanaViewModel) {
                 valueRange = 0f..dur.toFloat(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(fmtTime(vm.positionMs), color = Nux.TextLo, fontSize = 12.sp)
-                Text(fmtTime(vm.durationMs), color = Nux.TextLo, fontSize = 12.sp)
+                Text(fmtTime(vm.positionMs), color = Nux.TextLo, fontSize = 11.sp)
+                Text(fmtTime(vm.durationMs), color = Nux.TextLo, fontSize = 11.sp)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Pill(if (vm.isPlaying) "Пауза" else "Играть", selected = vm.isPlaying, accent = Nux.Orange) {
-                    vm.togglePlayPause()
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("▶", selected = vm.isPlaying, accent = Nux.Orange) {
+                    if (!vm.isPlaying) vm.togglePlayPause()
                 }
+                Pill("⏸", selected = false, accent = Nux.Orange) {
+                    if (vm.isPlaying) vm.togglePlayPause()
+                }
+                Pill("⏹", selected = false, accent = Nux.Orange) { vm.stopPlayback() }
                 Pill("Луп", selected = vm.looping, accent = Nux.Orange) { vm.toggleLoop() }
                 Pill("${vm.speed}x", selected = false, accent = Nux.Orange) { vm.cycleSpeed() }
             }
-            if (vm.jamStatus.isNotEmpty()) {
-                Text(vm.jamStatus, color = Nux.TextLo, fontSize = 12.sp)
-            }
         }
 
-        Panel(accent = Nux.Pink) {
-            Text("Куда играет минусовка", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Через комбик", selected = vm.jamThroughAmp, accent = Nux.Orange) {
-                    vm.chooseJamOutput(true)
-                }
-                Pill("Через телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) {
-                    vm.chooseJamOutput(false)
-                }
-            }
-            val ampSeen = vm.ampAudioAvailable()
-            Text(
-                if (ampSeen) "✓ Комбик виден как аудиоустройство — минусовка пойдёт в него."
-                else "✗ Комбик сейчас НЕ виден телефону как аудио. Так и должно быть в режиме " +
-                    "управления (MIDI). См. ниже, как вывести звук в комбик.",
-                color = if (ampSeen) Nux.TextHi else Nux.Pink, fontSize = 12.sp,
-            )
-            Text("Выходы: ${vm.audioOutputs()}", color = Nux.TextLo, fontSize = 11.sp)
-        }
-
+        // Volumes (compact)
         Panel {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Блокировать кнопки телефона", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-                OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
-            }
-            Text(
-                "Включи, если при подключённом AUX-кабеле сама скачет громкость или срабатывают " +
-                    "кнопки — это наводка по кабелю. Блокирует кнопки громкости/медиа, пока открыто " +
-                    "приложение. Лучшее решение — кабель-переходник TRRS→TRS (3 контакта) или " +
-                    "устранитель «земляной петли» (ground loop isolator).",
-                color = Nux.TextLo, fontSize = 11.sp,
-            )
-        }
-
-        Panel {
-            Text("Как вывести звук в комбик", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Важное ограничение Katana Gen 3: по одному USB-кабелю Android умеет ЛИБО " +
-                    "управлять комбиком (MIDI), ЛИБО принимать от телефона звук — но не одновременно. " +
-                    "Поэтому есть 3 способа:",
-                color = Nux.TextLo, fontSize = 12.sp,
-            )
-            Text(
-                "1) AUX-кабель (проще всего, работает сразу). 3.5-мм кабель из телефона в гнездо " +
-                    "AUX IN комбика. Минусовка играет через комбик, а приложение по USB продолжает " +
-                    "рулить тоном. Нужен разъём для наушников (или переходник на отдельный порт).",
-                color = Nux.TextLo, fontSize = 12.sp,
-            )
-            Text(
-                "2) USB Generic-режим. Включи комбик, удерживая [MOD] (не [BOOSTER]). Тогда телефон " +
-                    "увидит комбик как аудио и минусовка пойдёт по USB. НО управление тоном (MIDI) в " +
-                    "этом режиме не работает — либо джем, либо управление.",
-                color = Nux.TextLo, fontSize = 12.sp,
-            )
-            Text(
-                "3) BT-DUAL (адаптер Bluetooth от BOSS). Даёт и звук, и MIDI одновременно по " +
-                    "Bluetooth — это официальный способ Roland для телефона. Приложение направит " +
-                    "минусовку в него автоматически.",
-                color = Nux.TextLo, fontSize = 12.sp,
-            )
-        }
-
-        Panel {
-            Text("Громкость", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            Text("Минусовка (MP3): ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(
-                value = vm.mp3Volume,
-                onValueChange = { vm.changeMp3Volume(it) },
-                valueRange = 0f..1f,
-            )
+            Text("MP3: ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
+            Slider(value = vm.mp3Volume, onValueChange = { vm.changeMp3Volume(it) }, valueRange = 0f..1f)
             val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
-            Text("Гитара (усилитель): $gv", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(
-                value = gv.toFloat(),
-                onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
-                valueRange = 0f..100f,
-            )
-            Text(
-                "Минусовка играет через телефон, гитару регулирует громкость усилителя.",
-                color = Nux.TextLo, fontSize = 11.sp,
-            )
+            Text("Гитара: $gv", color = Nux.TextLo, fontSize = 12.sp)
+            Slider(value = gv.toFloat(), onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
+                valueRange = 0f..100f)
         }
 
-        Panel {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Мои треки", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-                Pill("Добавить MP3", selected = true, accent = Nux.Orange) {
-                    picker.launch(arrayOf("audio/*"))
-                }
-            }
-            if (vm.tracks.isEmpty()) Text("Пусто — добавь трек.", color = Nux.TextLo, fontSize = 12.sp)
+        // Output + key-lock (compact, one row each)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Pill("Комбик", selected = vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(true) }
+            Pill("Телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(false) }
+            Text(if (vm.ampAudioAvailable()) "✓" else "✗",
+                color = if (vm.ampAudioAvailable()) Nux.Orange else Nux.Pink, fontSize = 16.sp)
+            Box(Modifier.weight(1f))
+            Text("Кнопки", color = Nux.TextLo, fontSize = 12.sp)
+            OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
+        }
+
+        // Track list fills the rest and scrolls internally
+        if (vm.tracks.isEmpty()) {
+            Text("Пусто — жми «+ MP3».", color = Nux.TextLo, fontSize = 12.sp)
+        }
+        Column(
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             vm.tracks.forEachIndexed { i, t ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         t.name,
                         color = if (vm.currentTrack == i) Nux.Orange else Nux.TextHi,
                         modifier = Modifier.weight(1f).clickable { vm.playTrack(i) },
-                        maxLines = 1,
+                        maxLines = 1, fontSize = 13.sp,
                     )
                     Pill("▶", selected = false, accent = Nux.Orange) { vm.playTrack(i) }
                     Box(Modifier.padding(start = 8.dp)) {
@@ -533,151 +471,6 @@ private fun LibraryScreen(vm: KatanaViewModel) {
                     Box(Modifier.padding(start = 8.dp)) {
                         Pill("✕", selected = false, accent = Nux.Amp) { vm.deletePatch(patch.name) }
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LogScreen(vm: KatanaViewModel) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-
-    Column(
-        Modifier.fillMaxSize().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        DeviceTitle()
-        Text(
-            "Журнал действий: всё, что ты нажимаешь, и сработало ли это. " +
-                "Пройдись по вкладкам, нажми кнопки/ручки/тумблеры — потом жми «Копировать всё» и пришли мне.",
-            color = Nux.TextLo, fontSize = 12.sp,
-        )
-        Panel(accent = Nux.Orange) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill(if (copied) "Скопировано ✓" else "Копировать всё", selected = true, accent = Nux.Orange) {
-                    clipboard.setText(AnnotatedString(vm.actionLogText()))
-                    copied = true
-                }
-                Pill("Поделиться", selected = false, accent = Nux.Orange) {
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Katana Ctl — журнал действий")
-                        putExtra(Intent.EXTRA_TEXT, vm.actionLogText())
-                    }
-                    context.startActivity(Intent.createChooser(send, "Поделиться журналом"))
-                }
-                Pill("Очистить", selected = false, accent = Nux.Orange) {
-                    vm.clearActionLog(); copied = false
-                }
-            }
-            Text(
-                "Записей: ${vm.actionLog.size}   Связь: ${if (vm.connected) "есть" else "нет"}   " +
-                    "TX=${vm.txCount} RX=${vm.rxCount}",
-                color = Nux.TextLo, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            )
-        }
-        Panel {
-            if (vm.actionLog.isEmpty()) {
-                Text(
-                    "Пока пусто. Нажми что-нибудь на любой вкладке — здесь появится запись.",
-                    color = Nux.TextLo, fontSize = 12.sp,
-                )
-            } else {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    vm.actionLog.forEach { line ->
-                        val ok = !line.contains("нет связи") && !line.contains("ошибка")
-                        Text(
-                            line,
-                            color = if (ok) Nux.TextHi else Nux.Pink,
-                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConsoleScreen(vm: KatanaViewModel) {
-    var hex by remember { mutableStateOf("F0 41 00 00 00 00 33 11 60 00 00 30 00 00 00 0A 06 F7") }
-    var result by remember { mutableStateOf("") }
-    var addr by remember { mutableStateOf("60 00 00 30") }
-    var size by remember { mutableStateOf("16") }
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        var testMsg by remember { mutableStateOf("") }
-        DeviceTitle()
-        Panel(accent = Nux.Pink) {
-            Text("Тест усилителя Gen 3", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Кнопки шлют реальные адреса Gen 3 (Gain/EQ). Жми и слушай комбик — " +
-                    "звук должен меняться. Это те же адреса, что и у ручек на вкладке «Патч».",
-                color = Nux.TextLo, fontSize = 12.sp,
-            )
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Gain 100", selected = true, accent = Nux.Pink) { vm.setParam(KatanaParams.GAIN, 100); testMsg = "Gain → 100" }
-                Pill("Gain 0", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.GAIN, 0); testMsg = "Gain → 0" }
-                Pill("Vol 100", selected = true, accent = Nux.Pink) { vm.setParam(KatanaParams.VOLUME, 100); testMsg = "Volume → 100" }
-                Pill("Vol 20", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.VOLUME, 20); testMsg = "Volume → 20" }
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Bass 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.BASS, 100); testMsg = "Bass → 100" }
-                Pill("Bass 0", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.BASS, 0); testMsg = "Bass → 0" }
-                Pill("Treble 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.TREBLE, 100); testMsg = "Treble → 100" }
-                Pill("Mid 100", selected = false, accent = Nux.Pink) { vm.setParam(KatanaParams.MIDDLE, 100); testMsg = "Middle → 100" }
-            }
-            if (testMsg.isNotEmpty()) {
-                Text(testMsg, color = Nux.TextHi, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-            }
-        }
-        Panel {
-            Text("Отправить сырой SysEx", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(value = hex, onValueChange = { hex = it },
-                label = { Text("hex") }, modifier = Modifier.fillMaxWidth())
-            Pill("Отправить", selected = true, accent = Nux.Orange) { result = vm.sendRawHex(hex) }
-            if (result.isNotEmpty()) Text(result, color = Nux.TextLo, fontSize = 12.sp)
-        }
-        Panel {
-            Text("Прочитать блок (мэппинг Gen 3)", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(value = addr, onValueChange = { addr = it },
-                label = { Text("адрес 4 байта") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = size, onValueChange = { size = it },
-                label = { Text("байт") }, modifier = Modifier.fillMaxWidth())
-            Pill("Запросить", selected = true, accent = Nux.Orange) {
-                result = vm.readBlockHex(addr, size.toIntOrNull() ?: 16)
-            }
-        }
-        val context = LocalContext.current
-        Panel {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Лог TX/RX", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Поделиться", selected = true, accent = Nux.Orange) {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "Katana Ctl log")
-                            putExtra(Intent.EXTRA_TEXT, vm.logText())
-                        }
-                        context.startActivity(Intent.createChooser(send, "Поделиться логом"))
-                    }
-                    Pill("Очистить", selected = false, accent = Nux.Orange) { vm.clearLog() }
-                }
-            }
-            Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                vm.log.takeLast(200).forEach { line ->
-                    Text(line, color = Nux.TextHi, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                        maxLines = 1, modifier = Modifier.horizontalScroll(rememberScrollState()))
                 }
             }
         }
