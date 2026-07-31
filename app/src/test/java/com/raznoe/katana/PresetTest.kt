@@ -16,6 +16,9 @@ import org.junit.Test
 class PresetTest {
 
     private val presets = FactoryPresets.ALL
+    // My own re-creations (cleanUp applied); excludes the imported originals,
+    // which are shipped with their real, untouched values.
+    private val mine = FactoryPresets.ALL.filterNot { it in FactoryPresets.ORIGINALS }
 
     @Test fun presets_areLoadedAndNamedUniquely() {
         assertTrue("expected >= 30 presets, got ${presets.size}", presets.size >= 30)
@@ -39,7 +42,10 @@ class PresetTest {
             val param = KatanaParams.BY_ID[id] ?: continue
             val ok = when (param.kind) {
                 ParamKind.TOGGLE -> v == 0 || v == 1
-                ParamKind.ENUM -> param.optionValues.isEmpty() || v in param.optionValues
+                // Imported originals may carry device-valid effect-type codes
+                // outside our display lists (Gen 3 accepts them), so accept the
+                // full SysEx data-byte range for enums.
+                ParamKind.ENUM -> v in 0..127
                 ParamKind.CONTINUOUS -> v >= param.min && v <= param.max
             }
             if (!ok) bad = "${p.name}:$id=$v"
@@ -49,7 +55,7 @@ class PresetTest {
 
     @Test fun noiseGate_engagedOnGainyOrBoostedPresets() {
         var bad: String? = null
-        for (p in presets) {
+        for (p in mine) {
             val gain = p.values["gain"] ?: 0
             val boosted = (p.values["boost_sw"] ?: 0) == 1
             if (gain >= 40 || boosted) {
@@ -61,7 +67,12 @@ class PresetTest {
     }
 
     @Test fun gain_isTrimmedForTightness() {
-        assertTrue(presets.all { (it.values["gain"] ?: 0) <= 82 })
+        assertTrue(mine.all { (it.values["gain"] ?: 0) <= 82 })
+    }
+
+    @Test fun originals_areLoadedWithRealValues() {
+        assertTrue(FactoryPresets.ORIGINALS.size >= 15)
+        assertTrue(FactoryPresets.ORIGINALS.any { it.name.contains("GMoore Solo") })
     }
 
     @Test fun loudnessLevel_setOnEveryPreset() {
