@@ -158,23 +158,19 @@ class KatanaController(private val connection: UsbMidiConnection) {
             // candidate slot is what the app does (N() with the MK3 flag) and is
             // harmless — inactive slots aren't in the signal path — so the active
             // one always receives the value.
-            for (base in slots) {
-                enqueue(KatanaSysEx.buildSet(KatanaSysEx.gen3AddrFromBase(base, param.gen3Index), data), settleMs = 4)
-            }
+            for (base in slots) enqueueParam(KatanaSysEx.gen3AddrFromBase(base, param.gen3Index), data)
         } else {
-            enqueue(KatanaSysEx.buildSet(resolveAddress(param), data), settleMs = 4)
+            enqueueParam(resolveAddress(param), data)
         }
     }
 
     /**
      * Batch write for loading a whole preset: one message per param to the
-     * ACTIVE slot only (via the selector cache read on connect), paced a little
-     * slower. A full preset otherwise emits ~80+ messages (banked params ×3),
-     * which overruns the amp's MIDI buffer — only the first patch or two land.
-     * Single-slot + pacing keeps the whole patch reliable.
+     * ACTIVE slot only (via the selector cache read on connect). Goes through
+     * the same coalescing queue, so it can't flood the amp either.
      */
     fun applyParam(param: KatanaParam, value: Int) {
-        enqueue(KatanaSysEx.buildSet(resolveAddress(param), encode(param, value)), settleMs = 12)
+        enqueueParam(resolveAddress(param), encode(param, value))
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */
@@ -216,6 +212,42 @@ class KatanaController(private val connection: UsbMidiConnection) {
         }
     }
 
+    // --- coalescing parameter queue --------------------------------------
+    // A knob drag fires setParam dozens of times per second; without coalescing
+    // the single-thread queue grows faster than it drains (and banked params
+    // triple it), backing up until the app chokes and "stops working". We keep
+    // only the LATEST pending value per wire address — a 0→100 sweep collapses
+    // to a steady trickle, the queue never grows past the number of distinct
+    // addresses (~40), and the amp still lands on the final value.
+    private val pending = LinkedHashMap<String, ByteArray>()
+    private var drainScheduled = false
+
+    private fun enqueueParam(address: IntArray, data: IntArray) {
+        if (sender.isShutdown) return
+        val key = address.joinToString(",") { (it and 0xFF).toString() }
+        val frame = KatanaSysEx.buildSet(address, data)
+        val start: Boolean
+        synchronized(pending) {
+            pending[key] = frame
+            start = !drainScheduled
+            if (start) drainScheduled = true
+        }
+        if (start) runCatching { sender.submit { drainParams() } }
+    }
+
+    private fun drainParams() {
+        while (!sender.isShutdown) {
+            val frame: ByteArray = synchronized(pending) {
+                val k = pending.keys.firstOrNull()
+                if (k == null) { drainScheduled = false; return }
+                pending.remove(k)!!
+            }
+            sendNow(frame)
+            sleep(PARAM_SETTLE_MS)
+        }
+        synchronized(pending) { drainScheduled = false }
+    }
+
     // --- internals --------------------------------------------------------
     private fun enqueue(sysex: ByteArray, settleMs: Long) {
         if (sender.isShutdown) return
@@ -249,4 +281,11 @@ class KatanaController(private val connection: UsbMidiConnection) {
     }
 
     private fun sleep(ms: Long) = runCatching { if (ms > 0) Thread.sleep(ms) }
+
+    private companion object {
+        // Pace between coalesced parameter writes. Gentle enough that a full
+        // preset (~38 distinct addresses) never overruns the amp's MIDI buffer,
+        // fast enough that a knob feels responsive.
+        const val PARAM_SETTLE_MS = 10L
+    }
 }

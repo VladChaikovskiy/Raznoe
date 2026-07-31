@@ -166,5 +166,44 @@ object FactoryPresets {
             amp(1, 40, 50, 55, 55, 48); boost(1, 25, 55)
             delay(0, 500, 40, 45); reverb(3, level = 55, time = 75)
         },
+        // --- Singing / blues leads (в духе Gary Moore Solo) ---------------
+        preset("Sing Lead", "$N · поющий лид с сустейном, длинный дилей + холл") {
+            amp(4, 80, 48, 72, 55, 52); boost(12, 48, 68, tone = 55)
+            delay(7, 440, 42, 42); reverb(3, level = 42, time = 55)
+        },
+        preset("Moore Blues", "$N · тёплый блюз-лид, поёт на низкой громкости") {
+            amp(4, 72, 52, 70, 52, 48); boost(10, 45, 62)
+            delay(7, 380, 35, 34); reverb(3, level = 34, time = 45)
+        },
+        preset("Still Got Blues", "$N · мягкий скрипичный лид, много холла") {
+            amp(4, 76, 50, 74, 50, 46); boost(12, 42, 64, tone = 48)
+            delay(0, 420, 30, 36); reverb(3, level = 45, time = 60)
+        },
+        preset("SRV Texas", "$N · техасский овердрайв, tube screamer, пружина") {
+            amp(2, 60, 55, 68, 60, 52); boost(12, 55, 60); reverb(5, level = 26, time = 40)
+        },
+        preset("Santana Sustain", "$N · бесконечный сустейн, длинный дилей + холл") {
+            amp(4, 84, 50, 76, 52, 50); boost(0, 40, 66)
+            delay(7, 480, 45, 44); reverb(3, level = 48, time = 65)
+        },
+        preset("Slow Hand Lead", "$N · вудман-тон, средне-жирный лид") {
+            amp(4, 70, 48, 72, 50, 46); boost(11, 40, 60); reverb(3, level = 32, time = 45)
+        },
+        preset("Gilmour Big Lead", "$N · большой лид: овердрайв + длинный дилей + холл") {
+            amp(4, 74, 52, 66, 54, 50); boost(10, 46, 62)
+            delay(0, 470, 40, 46); reverb(3, level = 44, time = 62)
+        },
+        preset("Slash Rock Lead", "$N · рок-лид, крепкий кранч с серединой") {
+            amp(5, 80, 55, 62, 58, 52); boost(3, 50, 60)
+            delay(0, 400, 28, 32); reverb(1, level = 24, time = 35)
+        },
+        preset("Power Ballad", "$N · 80-е: хорус + большой дилей + холл") {
+            amp(4, 68, 50, 64, 56, 50); mod(29); boost(1, 30, 58)
+            delay(0, 450, 38, 44); reverb(3, level = 48, time = 65)
+        },
+        preset("Carlos Warm", "$N · тёплый поющий лид с мидбустом") {
+            amp(4, 78, 54, 74, 50, 48); boost(0, 45, 66, tone = 45)
+            delay(7, 430, 40, 40); reverb(3, level = 40, time = 55)
+        },
     )
 }
