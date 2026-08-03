@@ -58,9 +58,9 @@ class PresetTest {
         for (p in mine) {
             val gain = p.values["gain"] ?: 0
             val boosted = (p.values["boost_sw"] ?: 0) == 1
-            if (gain >= 40 || boosted) {
+            if (gain >= 45 || boosted) {
                 val thr = p.values["ns_thr"] ?: -1
-                if (p.values["ns_sw"] != 1 || thr !in 16..60) bad = p.name
+                if (p.values["ns_sw"] != 1 || thr !in 20..64) bad = p.name
             }
         }
         assertNull("gainy/boosted preset without a proper noise gate", bad)

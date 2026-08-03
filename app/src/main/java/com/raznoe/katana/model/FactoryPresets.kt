@@ -61,21 +61,27 @@ object FactoryPresets {
     }
 
     /**
-     * Tame hiss/mush on overdriven presets: (1) engage the Noise Suppressor with
-     * a threshold scaled to how hot the tone is, and (2) trim runaway gain a bit.
-     * High-gain amps without a gate sound "dirty/noisy" — this cleans them up
-     * while leaving clean/low-gain presets untouched.
+     * Engage the Noise Suppressor and raise its threshold to a sensible minimum
+     * on any overdriven/boosted tone. High-gain guitar picks up mains hum + pickup
+     * hiss; without a firm gate the preset "фонит". We only ever RAISE the
+     * threshold (never weaken a preset that already gates harder) and set a snappy
+     * release, leaving clean/low-gain tones untouched.
      */
-    private fun cleanUp(v: LinkedHashMap<String, Int>) {
+    private fun gate(v: LinkedHashMap<String, Int>) {
         val gain = v["gain"] ?: 0
         val boosted = (v["boost_sw"] ?: 0) == 1
-        // Trim only the most extreme gain so tones stay tight, not fizzy.
-        if (gain > 82) v["gain"] = 82
-        val g = v["gain"] ?: gain
-        if ((v["ns_sw"] ?: 0) != 1 && (g >= 40 || boosted)) {
+        if (gain >= 45 || boosted) {
             v["ns_sw"] = 1
-            v["ns_thr"] = (16 + (g - 40) * 6 / 10).coerceIn(16, 60)
+            val want = (26 + (gain - 45) * 6 / 10).coerceIn(26, 62)
+            if ((v["ns_thr"] ?: 0) < want) v["ns_thr"] = want
+            if ((v["ns_rel"] ?: 0) <= 0) v["ns_rel"] = 45
         }
+    }
+
+    /** For my own re-creations: trim runaway gain a touch, then gate. */
+    private fun cleanUp(v: LinkedHashMap<String, Int>) {
+        if ((v["gain"] ?: 0) > 82) v["gain"] = 82
+        gate(v)
     }
 
     /** Approximate equal-loudness amp Level from gain + boost drive/level. */
@@ -94,8 +100,15 @@ object FactoryPresets {
     //      bundled .kat files (BOSS demo set + JuCaNeRy "JNs" demos). These are
     //      the ORIGINAL values (gain/EQ/levels/effects), not re-creations. Amp
     //      TYPE is mapped from the MkII code to the nearest Gen 3 amp model.
-    private fun orig(name: String, values: Map<String, Int>): Patch =
-        Patch(name = name, values = values, note = "Оригинал (демо BOSS / JuCaNeRy)")
+    private fun orig(name: String, values: Map<String, Int>): Patch {
+        val v = LinkedHashMap(values)
+        gate(v) // keep the original tone, just ensure hum is gated
+        // Some demo patches ship with a very low amp Level (e.g. ACDC = 21) and
+        // sound "broken"/silent when recalled. Clamp into an audible, balanced
+        // band so every preset is usable without wildly uneven loudness.
+        v["volume"] = (v["volume"] ?: 70).coerceIn(55, 90)
+        return Patch(name = name, values = v, note = "Оригинал (демо BOSS / JuCaNeRy)")
+    }
 
     val ORIGINALS: List<Patch> = listOf(
         orig("★ GMoore Solo", mapOf(
