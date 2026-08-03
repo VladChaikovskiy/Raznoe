@@ -403,8 +403,9 @@ private fun JamScreen(vm: KatanaViewModel) {
             verticalAlignment = Alignment.CenterVertically) {
             Pill("Комбик", selected = vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(true) }
             Pill("Телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(false) }
-            Text(if (vm.ampAudioAvailable()) "✓" else "✗",
-                color = if (vm.ampAudioAvailable()) Nux.Orange else Nux.Pink, fontSize = 16.sp)
+            val ampSeen = vm.ampAudioAvailable()
+            Text(if (ampSeen) "✓" else "✗",
+                color = if (ampSeen) Nux.Orange else Nux.Pink, fontSize = 16.sp)
             Box(Modifier.weight(1f))
             Text("Кнопки", color = Nux.TextLo, fontSize = 12.sp)
             OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }

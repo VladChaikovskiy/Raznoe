@@ -77,6 +77,7 @@ object UsbMidiPacketizer {
      */
     class SysExReassembler(private val onSysEx: (ByteArray) -> Unit) {
         private val current = ArrayList<Byte>(256)
+        private val MAX_SYSEX = 8192
 
         fun push(buffer: ByteArray, length: Int) {
             var i = 0
@@ -93,6 +94,10 @@ object UsbMidiPacketizer {
                     // Other CINs (channel voice etc.) are not needed here.
                     else -> { /* ignore */ }
                 }
+                // A corrupt/glitchy stream (a SysEx start with no end byte) would
+                // otherwise grow `current` without bound. Katana frames are small;
+                // drop anything absurdly long.
+                if (current.size > MAX_SYSEX) current.clear()
                 i += 4
             }
         }

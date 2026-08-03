@@ -201,15 +201,18 @@ class KatanaController(private val connection: UsbMidiConnection) {
     /** Send a fully-formed raw SysEx frame (from the console). */
     fun sendSysEx(sysex: ByteArray) = enqueue(sysex, settleMs = 4)
 
-    /** Politely leave editor mode and stop the sender. */
+    /**
+     * Politely leave editor mode and stop the sender. Capped short so callers
+     * (disconnect on the main thread) never freeze the UI; a still-running drain
+     * is force-stopped with shutdownNow.
+     */
     fun shutdown() {
+        runCatching { synchronized(pending) { pending.clear() } }
         runCatching {
-            sender.submit {
-                sendNow(KatanaSysEx.editorMode(false))
-            }
+            sender.submit { runCatching { sendNow(KatanaSysEx.editorMode(false)) } }
             sender.shutdown()
-            sender.awaitTermination(500, TimeUnit.MILLISECONDS)
-        }
+            if (!sender.awaitTermination(150, TimeUnit.MILLISECONDS)) sender.shutdownNow()
+        }.onFailure { runCatching { sender.shutdownNow() } }
     }
 
     // --- coalescing parameter queue --------------------------------------
@@ -232,7 +235,12 @@ class KatanaController(private val connection: UsbMidiConnection) {
             start = !drainScheduled
             if (start) drainScheduled = true
         }
-        if (start) runCatching { sender.submit { drainParams() } }
+        if (start) {
+            // If submit fails (executor shut down mid-call), clear the latch so a
+            // future enqueue can start a fresh drainer instead of deadlocking.
+            runCatching { sender.submit { drainParams() } }
+                .onFailure { synchronized(pending) { drainScheduled = false } }
+        }
     }
 
     private fun drainParams() {

@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.atomic.AtomicInteger
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -70,8 +71,17 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
-    val log = mutableStateListOf<String>()
-    val actionLog = mutableStateListOf<String>()
+    // Diagnostic logs: plain, capped, thread-safe — NOT Compose state. Nothing
+    // in the UI reads them, so per-packet snapshot writes were pure main-thread
+    // load (the cause of "works then freezes"). appendLog/logAction never touch
+    // the main thread now.
+    private val log = ArrayDeque<String>()
+    private val actionLog = ArrayDeque<String>()
+    // TX/RX counters are hit on the USB threads for every packet; increment
+    // lock-free and push to Compose state at most a few times/sec.
+    private val txAtomic = AtomicInteger(0)
+    private val rxAtomic = AtomicInteger(0)
+    @Volatile private var countsPostScheduled = false
     val patches = mutableStateListOf<Patch>()
 
     // --- Jam player state -------------------------------------------------
@@ -161,6 +171,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     private var focusRequest: AudioFocusRequest? = null
 
     private fun requestAudioFocus() {
+        abandonAudioFocus() // release any previous request first
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -226,10 +237,10 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val conn = UsbMidiConnection(usbManager, device)
         val ctl = KatanaController(conn)
         ctl.onTraffic = { dir, sysex ->
-            onMain { if (dir == "RX") rxCount++ else txCount++ }
+            bumpCount(dir == "RX")
             appendLog("$dir  ${KatanaSysEx.toHex(sysex)}")
         }
-        ctl.onIncoming = { incoming -> onMain { gotData = true; applyIncoming(incoming) } }
+        ctl.onIncoming = { incoming -> onMain { if (!gotData) gotData = true; applyIncoming(incoming) } }
         ctl.onInfo = { msg -> appendLog(msg) }
         ctl.onSelectors = { sel ->
             logAction("gen3sel", "Gen3 FX-BOX слоты: booster=${sel[0]} mod=${sel[1]} " +
@@ -244,11 +255,19 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         conn.onDisconnect = {
+            // Reader thread died (USB glitch/unplug). Tear the connection down
+            // FULLY off the main thread, so we don't leave a half-dead pipe
+            // (sender alive, reader dead, interface still claimed) that would
+            // make the app look "stuck" and block a future reconnect.
             onMain {
-                if (connected) {
+                if (connection === conn) {
+                    val dead = controller
+                    controller = null; connection = null
                     connected = false
                     status = "Комбик отключён (проверь кабель)"
                     appendLog("— соединение потеряно —")
+                    Thread { runCatching { dead?.shutdown() }; runCatching { conn.close() } }
+                        .apply { isDaemon = true }.start()
                 }
             }
         }
@@ -263,7 +282,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         connected = true
         connectedLabel = device.productName ?: "BOSS Katana"
         status = "Подключено: $connectedLabel"
-        txCount = 0; rxCount = 0; noResponse = false; gotData = false
+        txAtomic.set(0); rxAtomic.set(0); txCount = 0; rxCount = 0
+        noResponse = false; gotData = false
         appendLog("— подключено (PID %04X) —".format(device.productId))
         appendLog("USB: ${conn.diagnostics}")
         appendLog("— рукопожатие + автоопределение диалекта —")
@@ -296,26 +316,38 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     // --- Action log (what the user pressed, address used, sent or not) ----
     private var lastActionKey = ""
 
-    private fun logAction(key: String, text: String) = onMain {
+    private fun logAction(key: String, text: String) = synchronized(actionLog) {
         if (key.isNotEmpty() && key == lastActionKey && actionLog.isNotEmpty()) {
             actionLog[actionLog.size - 1] = text
         } else {
-            actionLog.add(text)
-            if (actionLog.size > 600) actionLog.removeAt(0)
+            actionLog.addLast(text)
+            while (actionLog.size > 600) actionLog.removeFirst()
         }
         lastActionKey = key
     }
 
     private fun addrHex(a: IntArray) = a.joinToString(" ") { "%02X".format(it and 0xFF) }
 
-    fun clearActionLog() { actionLog.clear(); lastActionKey = "" }
+    fun clearActionLog() = synchronized(actionLog) { actionLog.clear(); lastActionKey = "" }
 
     fun actionLogText(): String = buildString {
         append("Katana Ctl — журнал действий\n")
         append("Подключено: $connected ($connectedLabel)  ID: ${identityInfo.ifEmpty { "—" }}\n")
         append("Профиль: ${KatanaSysEx.generation}  заголовок ${KatanaSysEx.headerHex()}\n")
-        append("TX=$txCount RX=$rxCount\n----\n")
-        append(actionLog.joinToString("\n"))
+        append("TX=${txAtomic.get()} RX=${rxAtomic.get()}\n----\n")
+        append(synchronized(actionLog) { actionLog.joinToString("\n") })
+    }
+
+    /** Push USB-thread packet counters to Compose state a few times/sec. */
+    private fun bumpCount(rx: Boolean) {
+        if (rx) rxAtomic.incrementAndGet() else txAtomic.incrementAndGet()
+        if (!countsPostScheduled) {
+            countsPostScheduled = true
+            mainHandler.postDelayed({
+                countsPostScheduled = false
+                txCount = txAtomic.get(); rxCount = rxAtomic.get()
+            }, 300)
+        }
     }
 
     // --- Controls ---------------------------------------------------------
@@ -393,11 +425,15 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                 if (pa[0] != addr[0] || pa[1] != addr[1] || pa[2] != addr[2]) continue
                 val offset = pa[3] - addr[3]
                 if (offset < 0 || offset >= data.size) continue
-                paramValues[p.id] = if (p.word && offset + 1 < data.size) {
+                val v = if (p.word && offset + 1 < data.size) {
                     ((data[offset] and 0x7F) shl 7) or (data[offset + 1] and 0x7F)
                 } else {
                     data[offset] and 0x7F
                 }
+                // Skip no-op writes: the amp echoes back every value we send, so
+                // most inbound frames match what we already have — updating the
+                // snapshot map anyway would trigger needless recomposition.
+                if (paramValues[p.id] != v) paramValues[p.id] = v
             }
         }
     }
@@ -507,6 +543,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
             isPlaying = false
             jamStatus = "Ошибка воспроизведения ($what/$extra). Попробуй другой файл."
             logAction("", "Джем: ОШИБКА воспроизведения «${t.name}» (код $what/$extra)")
+            releasePlayer(); abandonAudioFocus()
             true
         }
         player = mp
@@ -573,22 +610,23 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Log --------------------------------------------------------------
-    fun clearLog() = log.clear()
+    fun clearLog() = synchronized(log) { log.clear() }
 
     /** Full log as shareable text (for sending diagnostics). */
     fun logText(): String = buildString {
         append("Katana Ctl — диагностика\n")
         append("Подключено: $connected  ($connectedLabel)\n")
         append("ID: ${identityInfo.ifEmpty { "—" }}\n")
-        append("TX=$txCount  RX=$rxCount  noResponse=$noResponse\n")
+        append("TX=${txAtomic.get()}  RX=${rxAtomic.get()}  noResponse=$noResponse\n")
         append("Профиль modelId=0x%02X\n".format(KatanaSysEx.modelId))
         append("----\n")
-        append(log.joinToString("\n"))
+        append(synchronized(log) { log.joinToString("\n") })
     }
 
-    private fun appendLog(line: String) = onMain {
-        log.add(line)
-        if (log.size > MAX_LOG_LINES) log.removeAt(0)
+    // Off the main thread, cheap, capped — called for every USB packet.
+    private fun appendLog(line: String) = synchronized(log) {
+        log.addLast(line)
+        while (log.size > MAX_LOG_LINES) log.removeFirst()
     }
 
     private fun onMain(block: () -> Unit) {
