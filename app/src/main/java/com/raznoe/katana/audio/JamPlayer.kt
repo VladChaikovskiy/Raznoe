@@ -259,7 +259,8 @@ class JamPlayer(private val app: Context) {
         positionMs = target
     }
 
-    fun setVolume(v: Float) = onMain {
+    /** Not `setVolume`: that JVM signature is taken by the [volume] property. */
+    fun changeVolume(v: Float) = onMain {
         volume = v.coerceIn(0f, 1f)
         runCatching { player?.setVolume(volume, volume) }
     }
@@ -287,7 +288,8 @@ class JamPlayer(private val app: Context) {
 
     // --- routing ----------------------------------------------------------
 
-    fun setOutput(o: JamOutput) = onMain {
+    /** Not `setOutput`: that JVM signature is taken by the [output] property. */
+    fun chooseOutput(o: JamOutput) = onMain {
         output = o
         player?.let { applyRoute(it) }
         refreshRouteLabel()

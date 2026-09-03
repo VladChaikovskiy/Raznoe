@@ -450,7 +450,7 @@ private fun JamScreen(vm: KatanaViewModel) {
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 JamOutput.entries.forEach { o ->
-                    Pill(o.label, selected = jam.output == o, accent = Nux.Orange) { jam.setOutput(o) }
+                    Pill(o.label, selected = jam.output == o, accent = Nux.Orange) { jam.chooseOutput(o) }
                 }
             }
             key(routeTick) {
@@ -480,7 +480,7 @@ private fun JamScreen(vm: KatanaViewModel) {
         // Volumes (compact)
         Panel {
             Text("MP3: ${(jam.volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(value = jam.volume, onValueChange = { jam.setVolume(it) }, valueRange = 0f..1f)
+            Slider(value = jam.volume, onValueChange = { jam.changeVolume(it) }, valueRange = 0f..1f)
             val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
             Text("Гитара: $gv", color = Nux.TextLo, fontSize = 12.sp)
             Slider(value = gv.toFloat(), onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
