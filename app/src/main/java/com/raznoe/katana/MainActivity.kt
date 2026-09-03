@@ -1,10 +1,12 @@
 package com.raznoe.katana
 
+import android.Manifest
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -12,6 +14,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import com.raznoe.katana.ui.KatanaApp
@@ -21,6 +24,9 @@ class MainActivity : ComponentActivity() {
 
     private val vm: KatanaViewModel by viewModels()
     private lateinit var usbManager: UsbManager
+
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -50,7 +56,21 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        askForNotifications()
         handleAttachIntent(intent)
+    }
+
+    /**
+     * The playback notification is what lets the backing track keep going with
+     * the app off screen (Android 13+ needs permission to post it). Denying it
+     * only costs the transport controls — playback itself still works.
+     */
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) runCatching { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
     }
 
     override fun onNewIntent(intent: Intent) {

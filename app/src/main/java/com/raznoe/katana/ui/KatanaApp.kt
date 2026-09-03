@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.raznoe.katana.DeviceInfo
 import com.raznoe.katana.KatanaViewModel
+import com.raznoe.katana.audio.JamOutput
 import com.raznoe.katana.model.FactoryPresets
 import com.raznoe.katana.model.Patch
 import com.raznoe.katana.protocol.KatanaParam
@@ -103,13 +105,15 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 
 @Composable
 private fun DeviceTitle() {
-    Text(
-        "K A T A N A",
-        color = Nux.TextLo,
-        fontWeight = FontWeight.Bold,
-        fontSize = 16.sp,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-    )
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        Text(
+            "K A T A N A",
+            color = Nux.TextLo,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+        )
+        Text("by Vlad_i_c", color = Nux.Orange, fontSize = 11.sp)
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -121,6 +125,7 @@ private fun PatchScreen(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Un
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         DeviceTitle()
+        CrashBanner(vm)
         ConnectionStrip(vm, onConnectRequest)
 
         // Channels
@@ -230,6 +235,30 @@ private fun BlockEditor(vm: KatanaViewModel, block: Block) {
 
 private fun mark(p: KatanaParam) = if (!p.verified) " (?)" else ""
 
+/**
+ * Shown once after the app has gone down, with the trace ready to copy. The
+ * phone is in a rehearsal room with no logcat attached, so this is the only way
+ * a crash ever gets reported.
+ */
+@Composable
+private fun CrashBanner(vm: KatanaViewModel) {
+    val crash = vm.lastCrash ?: return
+    val clipboard = LocalClipboardManager.current
+    Panel(accent = Nux.Amp) {
+        Text("⚠ В прошлый раз приложение упало", color = Nux.Amp, fontWeight = FontWeight.SemiBold)
+        Text(
+            crash.lineSequence().take(6).joinToString("\n"),
+            color = Nux.TextLo, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Pill("Скопировать", selected = true, accent = Nux.Amp) {
+                clipboard.setText(AnnotatedString(crash))
+            }
+            Pill("Скрыть", selected = false, accent = Nux.Amp) { vm.dismissCrashReport() }
+        }
+    }
+}
+
 @Composable
 private fun ConnectionStrip(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
     Panel {
@@ -312,14 +341,23 @@ private fun PresetsScreen(vm: KatanaViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         DeviceTitle()
-        Text("Пресеты (мои версии)", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Пресеты", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text(
-            "Стартовые тоны в духе известных названий. Это мои версии, не оригинальные JNs. " +
-                "Нажми «Загрузить» — параметры уйдут на комбик.",
+            "★ — оригинальные демо-патчи BOSS/JuCaNeRy, остальные — мои версии. " +
+                "Каждый пресет задаёт ВСЕ параметры сразу, поэтому от предыдущего тона " +
+                "ничего не остаётся, и на каждом включён шумодав.",
             color = Nux.TextLo, fontSize = 12.sp,
         )
+        if (vm.presetStatus.isNotEmpty()) {
+            Text(
+                vm.presetStatus,
+                color = if (vm.presetLoading != null) Nux.Orange else Nux.Gate,
+                fontSize = 12.sp,
+            )
+        }
         FactoryPresets.ALL.forEach { p ->
             val active = vm.activePreset == p.name
+            val loading = vm.presetLoading == p.name
             Panel(accent = if (active) Nux.Gate else Nux.Stroke) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
@@ -331,7 +369,12 @@ private fun PresetsScreen(vm: KatanaViewModel) {
                         )
                         if (p.note.isNotEmpty()) Text(p.note, color = Nux.TextLo, fontSize = 11.sp)
                     }
-                    Pill(if (active) "Активен" else "Загрузить", selected = active, accent = Nux.Orange) {
+                    val label = when {
+                        loading -> "…"
+                        active -> "Активен"
+                        else -> "Загрузить"
+                    }
+                    Pill(label, selected = active || loading, accent = Nux.Orange) {
                         vm.applyPatch(p)
                     }
                 }
@@ -342,12 +385,19 @@ private fun PresetsScreen(vm: KatanaViewModel) {
 
 @Composable
 private fun JamScreen(vm: KatanaViewModel) {
+    val jam = vm.jam
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { vm.addTrack(it) }
     }
-    LaunchedEffect(vm.isPlaying) {
-        while (vm.isPlaying) { vm.refreshPosition(); delay(400) }
+    LaunchedEffect(jam.isPlaying) {
+        while (jam.isPlaying) { jam.refreshPosition(); delay(400) }
     }
+    // Whether a Bluetooth/USB output exists is queried from AudioManager rather
+    // than held as state, so tick the screen to pick up a device that connects
+    // while this tab is open.
+    var routeTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(2000); routeTick++ } }
+
     Column(
         Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -361,53 +411,86 @@ private fun JamScreen(vm: KatanaViewModel) {
 
         // Now playing: name, seek, transport with Play/Pause/Stop
         Panel(accent = Nux.Orange) {
-            val idx = vm.currentTrack
-            val name = idx?.let { vm.tracks.getOrNull(it)?.name } ?: "Ничего не выбрано"
+            val name = jam.trackName.ifEmpty { "Ничего не выбрано" }
             Text(name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold, maxLines = 1, fontSize = 13.sp)
-            val dur = if (vm.durationMs > 0) vm.durationMs else 1
+            val dur = if (jam.durationMs > 0) jam.durationMs else 1
             Slider(
-                value = vm.positionMs.coerceIn(0, dur).toFloat(),
-                onValueChange = { vm.seekTo(it.toInt()) },
+                value = jam.positionMs.coerceIn(0, dur).toFloat(),
+                onValueChange = { jam.seekTo(it.toInt()) },
                 valueRange = 0f..dur.toFloat(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(fmtTime(vm.positionMs), color = Nux.TextLo, fontSize = 11.sp)
-                Text(fmtTime(vm.durationMs), color = Nux.TextLo, fontSize = 11.sp)
+                Text(fmtTime(jam.positionMs), color = Nux.TextLo, fontSize = 11.sp)
+                Text(fmtTime(jam.durationMs), color = Nux.TextLo, fontSize = 11.sp)
             }
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("▶", selected = vm.isPlaying, accent = Nux.Orange) {
-                    if (!vm.isPlaying) vm.togglePlayPause()
+                Pill("▶", selected = jam.isPlaying, accent = Nux.Orange) {
+                    if (!jam.isPlaying) jam.togglePlayPause()
                 }
                 Pill("⏸", selected = false, accent = Nux.Orange) {
-                    if (vm.isPlaying) vm.togglePlayPause()
+                    if (jam.isPlaying) jam.togglePlayPause()
                 }
-                Pill("⏹", selected = false, accent = Nux.Orange) { vm.stopPlayback() }
-                Pill("Луп", selected = vm.looping, accent = Nux.Orange) { vm.toggleLoop() }
-                Pill("${vm.speed}x", selected = false, accent = Nux.Orange) { vm.cycleSpeed() }
+                Pill("⏹", selected = false, accent = Nux.Orange) { jam.stop() }
+                Pill("Луп", selected = jam.looping, accent = Nux.Orange) { jam.toggleLoop() }
+                Pill("${jam.speed}x", selected = false, accent = Nux.Orange) { jam.cycleSpeed() }
             }
+            if (jam.status.isNotEmpty()) {
+                Text(
+                    jam.status,
+                    color = if (jam.waitingForRoute) Nux.Amp else Nux.TextLo,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+
+        // Where the backing track goes
+        Panel(accent = if (jam.output == JamOutput.BLUETOOTH) Nux.Mod else Nux.Stroke) {
+            Text("Куда играет минусовка", color = Nux.TextLo, fontSize = 12.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JamOutput.entries.forEach { o ->
+                    Pill(o.label, selected = jam.output == o, accent = Nux.Orange) { jam.setOutput(o) }
+                }
+            }
+            key(routeTick) {
+                Text("Сейчас: ${jam.routeLabel}", color = Nux.TextHi, fontSize = 12.sp)
+                // Only the routes that can reach the amp are worth naming; the
+                // phone speaker is the fallback and needs no announcement.
+                val external = jam.routes().filter { it.bluetooth || it.usb }
+                if (external.isEmpty()) {
+                    Text(
+                        "Bluetooth и USB-аудио не подключены — минусовка пойдёт в телефон",
+                        color = Nux.TextLo, fontSize = 11.sp,
+                    )
+                } else {
+                    external.forEach { r ->
+                        Text("• ${r.kind}: ${r.name}", color = Nux.TextLo, fontSize = 11.sp)
+                    }
+                }
+            }
+            Text(
+                "Gen 3 умеет Bluetooth-аудио: подключи комбик в настройках Bluetooth телефона — " +
+                    "минусовка пойдёт через его динамик, а пресеты продолжат идти по USB-кабелю. " +
+                    "Если Bluetooth пропадёт, воспроизведение встанет на паузу и продолжится само.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
         }
 
         // Volumes (compact)
         Panel {
-            Text("MP3: ${(vm.mp3Volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(value = vm.mp3Volume, onValueChange = { vm.changeMp3Volume(it) }, valueRange = 0f..1f)
+            Text("MP3: ${(jam.volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
+            Slider(value = jam.volume, onValueChange = { jam.setVolume(it) }, valueRange = 0f..1f)
             val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
             Text("Гитара: $gv", color = Nux.TextLo, fontSize = 12.sp)
             Slider(value = gv.toFloat(), onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
                 valueRange = 0f..100f)
         }
 
-        // Output + key-lock (compact, one row each)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Pill("Комбик", selected = vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(true) }
-            Pill("Телефон", selected = !vm.jamThroughAmp, accent = Nux.Orange) { vm.chooseJamOutput(false) }
-            val ampSeen = vm.ampAudioAvailable()
-            Text(if (ampSeen) "✓" else "✗",
-                color = if (ampSeen) Nux.Orange else Nux.Pink, fontSize = 16.sp)
-            Box(Modifier.weight(1f))
-            Text("Кнопки", color = Nux.TextLo, fontSize = 12.sp)
+            Text("Блокировать кнопки телефона", color = Nux.TextLo, fontSize = 12.sp,
+                modifier = Modifier.weight(1f))
             OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
         }
 
@@ -415,6 +498,7 @@ private fun JamScreen(vm: KatanaViewModel) {
         if (vm.tracks.isEmpty()) {
             Text("Пусто — жми «+ MP3».", color = Nux.TextLo, fontSize = 12.sp)
         }
+        val playingIndex = vm.currentTrack
         Column(
             Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -425,7 +509,7 @@ private fun JamScreen(vm: KatanaViewModel) {
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         t.name,
-                        color = if (vm.currentTrack == i) Nux.Orange else Nux.TextHi,
+                        color = if (playingIndex == i) Nux.Orange else Nux.TextHi,
                         modifier = Modifier.weight(1f).clickable { vm.playTrack(i) },
                         maxLines = 1, fontSize = 13.sp,
                     )

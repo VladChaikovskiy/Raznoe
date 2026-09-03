@@ -6,6 +6,7 @@ import com.raznoe.katana.protocol.KatanaSysEx
 import com.raznoe.katana.protocol.ParamKind
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * High-level operations on the amp, layered over a [UsbMidiConnection].
@@ -59,6 +60,15 @@ class KatanaController(private val connection: UsbMidiConnection) {
         }
     }
 
+    /**
+     * True once the amp has actually reported the whole COLOR block, i.e. we
+     * know which physical slot each banked effect occupies. Until then a banked
+     * write has to go to every candidate slot, or it silently lands on the
+     * wrong one and the parameter appears to do nothing.
+     */
+    @Volatile var selectorsKnown = false
+        private set
+
     /** If a frame carries the COLOR block (20 00 04 0x), cache the selector bytes. */
     private fun captureSelectors(inc: KatanaSysEx.Incoming) {
         val a = inc.address
@@ -71,7 +81,12 @@ class KatanaController(private val connection: UsbMidiConnection) {
                     gen3Selectors[slot] = inc.data[i] and 0x7F; changed = true
                 }
             }
-            if (changed) onSelectors?.invoke(gen3Selectors.copyOf())
+            if (changed) {
+                if (start == 0 && inc.data.size >= KatanaParams.GEN3_SELECTOR_COUNT) {
+                    selectorsKnown = true
+                }
+                onSelectors?.invoke(gen3Selectors.copyOf())
+            }
         }
     }
 
@@ -101,44 +116,6 @@ class KatanaController(private val connection: UsbMidiConnection) {
         readAll()
     }
 
-    /**
-     * If the default MkII profile gets no reply, sweep every model id (0..0x7F)
-     * with a tiny read; the amp's reply (if any) carries its real prefix, which
-     * [handleInbound] adopts. Sent silently so it doesn't flood the log.
-     */
-    private fun probeModelIds() {
-        // Try both the classic device id (00 00 00 00) and the modern one (10 …,
-        // as used by recent BOSS gear like Katana:GO), sweeping the model byte.
-        val devPrefixes = listOf(
-            intArrayOf(0x00, 0x00, 0x00, 0x00),
-            intArrayOf(0x10, 0x00, 0x00, 0x00),
-        )
-        for (dev in devPrefixes) for (id in 0..0x7F) {
-            if (sender.isShutdown) return
-            runCatching {
-                sender.submit {
-                    if (headerLearned) return@submit
-                    KatanaSysEx.setPrefix(dev + intArrayOf(id))
-                    sendSilent(KatanaSysEx.editorMode(true))
-                    sendSilent(KatanaSysEx.buildQuery(intArrayOf(0x00, 0x01, 0x00, 0x00), 1))
-                    sleep(8)
-                }
-            }
-        }
-        runCatching {
-            sender.submit {
-                if (!headerLearned) {
-                    KatanaSysEx.resetProfile()
-                    onInfo?.invoke(
-                        "⚠ Диалект Gen 3 не определён автоперебором. У Gen 3 команды устроены " +
-                            "иначе, чем у MkII, и их формат пока не публичный. Нужен захват трафика " +
-                            "BOSS Tone Studio↔Gen3 (USB) — тогда впишу точный протокол.",
-                    )
-                }
-            }
-        }
-    }
-
     private fun encode(param: KatanaParam, value: Int): IntArray {
         // ENUM wire values can have gaps (e.g. Chorus == 29 while max index is
         // smaller), so only clamp continuous/toggle params.
@@ -147,30 +124,69 @@ class KatanaController(private val connection: UsbMidiConnection) {
         return if (param.word) intArrayOf((v shr 7) and 0x7F, v and 0x7F) else intArrayOf(v and 0x7F)
     }
 
-    /** Interactive single-knob write: robust ×3 across banked slots. */
-    fun setParam(param: KatanaParam, value: Int) {
-        val data = encode(param, value)
+    /**
+     * Every wire address a write for [param] has to reach.
+     *
+     * A banked Gen 3 effect parameter lives in whichever physical slot the
+     * effect currently occupies. Once the amp has told us the FX-BOX selectors
+     * ([selectorsKnown]) we write only the active slot; before that we write
+     * all three candidates — inactive slots are not in the signal path, so it
+     * is harmless, and it is the difference between the write landing and the
+     * parameter appearing to be ignored.
+     */
+    private fun addressesFor(param: KatanaParam): List<IntArray> {
         val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
         val slots = param.gen3Slots
         if (gen3 && slots != null) {
-            // Banked effect param: which physical slot is active depends on the
-            // FX-BOX selector, which we may not have read reliably. Writing every
-            // candidate slot is what the app does (N() with the MK3 flag) and is
-            // harmless — inactive slots aren't in the signal path — so the active
-            // one always receives the value.
-            for (base in slots) enqueueParam(KatanaSysEx.gen3AddrFromBase(base, param.gen3Index), data)
-        } else {
-            enqueueParam(resolveAddress(param), data)
+            if (selectorsKnown) return listOf(resolveAddress(param))
+            return slots.map { KatanaSysEx.gen3AddrFromBase(it, param.gen3Index) }
         }
+        return listOf(param.addressFor(gen3))
+    }
+
+    /** Interactive single-knob write. */
+    fun setParam(param: KatanaParam, value: Int) {
+        val data = encode(param, value)
+        for (addr in addressesFor(param)) enqueueParam(addr, data)
     }
 
     /**
-     * Batch write for loading a whole preset: one message per param to the
-     * ACTIVE slot only (via the selector cache read on connect). Goes through
-     * the same coalescing queue, so it can't flood the amp either.
+     * Load a whole patch as one atomic, ordered batch.
+     *
+     * This does NOT go through the coalescing knob queue: a preset is a set of
+     * values that must all land, in order, and coalescing by address meant a
+     * queued knob sweep could overwrite parameters the preset was still
+     * sending. Any pending knob writes are dropped, and a newer preset load
+     * supersedes one still in flight (tapping two presets quickly used to
+     * interleave them into a tone that was neither).
+     *
+     * @param onDone called on the sender thread with (framesSent, framesTotal);
+     *   framesSent < framesTotal means the load was superseded or torn down.
      */
-    fun applyParam(param: KatanaParam, value: Int) {
-        enqueueParam(resolveAddress(param), encode(param, value))
+    fun applyPreset(
+        entries: List<Pair<KatanaParam, Int>>,
+        onDone: ((sent: Int, total: Int) -> Unit)? = null,
+    ) {
+        val epoch = presetEpoch.incrementAndGet()
+        synchronized(pending) { pending.clear() }
+        val frames = ArrayList<ByteArray>(entries.size * 2)
+        for ((param, value) in entries) {
+            val data = encode(param, value)
+            for (addr in addressesFor(param)) frames.add(KatanaSysEx.buildSet(addr, data))
+        }
+        if (sender.isShutdown) { onDone?.invoke(0, frames.size); return }
+        runCatching {
+            sender.submit {
+                var sent = 0
+                for (f in frames) {
+                    if (sender.isShutdown || presetEpoch.get() != epoch) break
+                    sendNow(f)
+                    sent++
+                    sleep(PRESET_SETTLE_MS)
+                }
+                onDone?.invoke(sent, frames.size)
+            }
+        }.onFailure { onDone?.invoke(0, frames.size) }
     }
 
     /** Select Panel/CH1..CH4 via the documented SysEx address. */
@@ -224,6 +240,9 @@ class KatanaController(private val connection: UsbMidiConnection) {
     // addresses (~40), and the amp still lands on the final value.
     private val pending = LinkedHashMap<String, ByteArray>()
     private var drainScheduled = false
+
+    /** Id of the newest preset load; an older one still in flight aborts. */
+    private val presetEpoch = AtomicInteger(0)
 
     private fun enqueueParam(address: IntArray, data: IntArray) {
         if (sender.isShutdown) return
@@ -283,11 +302,6 @@ class KatanaController(private val connection: UsbMidiConnection) {
         onTraffic?.invoke(if (ok) "TX" else "TX-FAIL", sysex)
     }
 
-    /** Send without logging — used by the model-id sweep to avoid log spam. */
-    private fun sendSilent(sysex: ByteArray) {
-        connection.sendPackets(UsbMidiPacketizer.encodeSysEx(sysex))
-    }
-
     private fun sleep(ms: Long) = runCatching { if (ms > 0) Thread.sleep(ms) }
 
     private companion object {
@@ -295,5 +309,10 @@ class KatanaController(private val connection: UsbMidiConnection) {
         // preset (~38 distinct addresses) never overruns the amp's MIDI buffer,
         // fast enough that a knob feels responsive.
         const val PARAM_SETTLE_MS = 10L
+
+        // A preset is a long burst of writes rather than a knob being dragged,
+        // so it gets a slightly gentler pace — the amp has time to settle each
+        // block and nothing is dropped halfway through.
+        const val PRESET_SETTLE_MS = 12L
     }
 }

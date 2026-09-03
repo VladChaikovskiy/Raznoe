@@ -306,6 +306,66 @@ object KatanaParams {
     /** COLOR block that holds the 5 FX-BOX selector bytes. */
     val GEN3_SELECTOR_ADDR = a(0x20, 0x00, 0x04, 0x00)
 
+    // ---- Neutral values + value sanitising ------------------------------
+    /**
+     * The value a parameter gets when a preset does not mention it.
+     *
+     * Presets are expanded to the FULL parameter set before being sent (see
+     * [com.raznoe.katana.model.FactoryPresets]), so recalling one always lands
+     * on a deterministic tone instead of inheriting leftovers from whatever was
+     * loaded before — that inheritance was the cause of both "the preset didn't
+     * really load" and stray background noise from an effect nobody asked for.
+     *
+     * [KatanaParam.default] (0 for every knob) is NOT usable here: a Direct Mix
+     * of 0 mutes the dry guitar, and a Level of 0 makes the preset sound broken.
+     */
+    val NEUTRAL: Map<String, Int> = mapOf(
+        // Amp: middle-of-the-road clean.
+        "amp_type" to 1, "gain" to 50, "volume" to 80,
+        "bass" to 50, "middle" to 50, "treble" to 50, "presence" to 50,
+        // Booster: off, unity-ish.
+        "boost_sw" to 0, "boost_type" to 1, "boost_drive" to 40, "boost_bottom" to 50,
+        "boost_tone" to 50, "boost_solo" to 0, "boost_solo_lvl" to 50,
+        "boost_level" to 70, "boost_direct" to 0,
+        // Mod / FX: off, benign type.
+        "mod_sw" to 0, "mod_type" to 29,   // Chorus
+        "fx_sw" to 0, "fx_type" to 3,      // Comp
+        // Delay: off; dry signal fully through, tame repeats.
+        "delay_sw" to 0, "delay_type" to 0, "delay_time" to 400, "delay_fb" to 20,
+        "delay_hc" to 12, "delay_level" to 40, "delay_direct" to 100,
+        // Reverb: off; dry fully through, no rumble in the tail.
+        "reverb_sw" to 0, "reverb_type" to 1, "reverb_time" to 40, "reverb_pre" to 0,
+        "reverb_lc" to 6, "reverb_hc" to 11, "reverb_density" to 50,
+        "reverb_level" to 35, "reverb_direct" to 100, "reverb_spring" to 50,
+        // Noise suppressor: on by default — this amp hisses without it.
+        "ns_sw" to 1, "ns_thr" to 30, "ns_rel" to 45,
+    )
+
+    fun neutral(p: KatanaParam): Int = NEUTRAL[p.id] ?: when (p.kind) {
+        ParamKind.TOGGLE -> 0
+        ParamKind.ENUM -> p.valueOfIndex(0)
+        ParamKind.CONTINUOUS -> ((p.min + p.max) / 2)
+    }
+
+    /**
+     * Coerce [value] into something the amp will actually accept for [p].
+     *
+     * ENUM values matter most: the wire lists have gaps (e.g. Delay has no
+     * value 10), and sending a code the amp does not implement leaves the block
+     * in an undefined state. We snap to the nearest valid code instead.
+     */
+    fun sanitize(p: KatanaParam, value: Int): Int = when (p.kind) {
+        ParamKind.TOGGLE -> if (value != 0) 1 else 0
+        ParamKind.CONTINUOUS -> value.coerceIn(p.min, p.max)
+        ParamKind.ENUM ->
+            if (p.optionValues.isEmpty()) value.coerceIn(0, p.options.lastIndex.coerceAtLeast(0))
+            else if (value in p.optionValues) value
+            else p.optionValues.minByOrNull { kotlin.math.abs(it - value) } ?: 0
+    }
+
+    /** True if [value] is a code the amp implements for [p]. */
+    fun isValid(p: KatanaParam, value: Int): Boolean = sanitize(p, value) == value
+
     // ---- helpers ---------------------------------------------------------
     private fun a(b0: Int, b1: Int, b2: Int, b3: Int) = intArrayOf(b0, b1, b2, b3)
 

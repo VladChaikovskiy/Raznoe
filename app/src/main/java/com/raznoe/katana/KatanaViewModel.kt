@@ -5,16 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
-import android.media.AudioAttributes
-import android.media.AudioDeviceInfo
-import android.media.AudioFocusRequest
-import android.media.AudioManager
-import android.media.MediaPlayer
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import java.util.concurrent.atomic.AtomicInteger
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -22,6 +15,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import com.raznoe.katana.audio.Jam
+import com.raznoe.katana.audio.JamPlayer
+import com.raznoe.katana.model.FactoryPresets
 import com.raznoe.katana.model.Patch
 import com.raznoe.katana.model.PatchStore
 import com.raznoe.katana.model.Track
@@ -32,6 +28,7 @@ import com.raznoe.katana.protocol.KatanaSysEx
 import com.raznoe.katana.protocol.ParamKind
 import com.raznoe.katana.usb.KatanaController
 import com.raznoe.katana.usb.UsbMidiConnection
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Roland Corporation USB vendor id. */
 const val ROLAND_VENDOR_ID = 0x0582
@@ -48,6 +45,9 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     private var connection: UsbMidiConnection? = null
     private var controller: KatanaController? = null
+
+    /** Backing-track player. Application-scoped so playback outlives the UI. */
+    val jam: JamPlayer = Jam.get(app)
 
     // --- UI state ---------------------------------------------------------
     var status by mutableStateOf("Не подключено")
@@ -68,6 +68,15 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var gotData by mutableStateOf(false)
         private set
+    /** Name of the preset currently being written to the amp, if any. */
+    var presetLoading by mutableStateOf<String?>(null)
+        private set
+    /** Result of the last preset load, for the Пресеты screen. */
+    var presetStatus by mutableStateOf("")
+        private set
+    /** Stack trace of the last crash, so a field failure can be reported. */
+    var lastCrash by mutableStateOf<String?>(null)
+        private set
 
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
@@ -86,26 +95,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Jam player state -------------------------------------------------
     val tracks = mutableStateListOf<Track>()
-    var currentTrack by mutableStateOf<Int?>(null)
-        private set
-    var isPlaying by mutableStateOf(false)
-        private set
-    var positionMs by mutableStateOf(0)
-        private set
-    var durationMs by mutableStateOf(0)
-        private set
-    var looping by mutableStateOf(false)
-        private set
-    var speed by mutableStateOf(1.0f)
-        private set
-    var mp3Volume by mutableStateOf(0.8f)
-        private set
-    var jamStatus by mutableStateOf("")
-        private set
     var activePreset by mutableStateOf("")
-        private set
-    /** true => route MP3 to the amp's USB-audio out (mix with guitar in the combo). */
-    var jamThroughAmp by mutableStateOf(true)
         private set
     /**
      * true => the Activity swallows hardware volume/media key events. Guards
@@ -114,108 +104,32 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
      */
     var lockHardwareKeys by mutableStateOf(false)
         private set
-    private var player: MediaPlayer? = null
 
     fun setKeyLock(on: Boolean) { lockHardwareKeys = on }
-
-    fun chooseJamOutput(throughAmp: Boolean) {
-        jamThroughAmp = throughAmp
-        // Re-apply routing live if a track is playing.
-        player?.let { applyPreferredOutput(it) }
-    }
-
-    /** Names of the current audio output routes (for the UI/log). */
-    fun audioOutputs(): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "?"
-        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .joinToString(", ") { audioTypeName(it.type) }
-            .ifEmpty { "нет" }
-    }
-
-    /**
-     * The amp's audio output as Android sees it: USB audio (amp in Generic USB
-     * mode) or Bluetooth A2DP (BT-DUAL adaptor). In Vendor USB mode (power-on
-     * with [BOOSTER], needed for MIDI) the amp needs BOSS's proprietary driver,
-     * which Android does not have — so no USB-audio device appears and MP3 can
-     * only reach the amp via Generic mode, BT-DUAL, or the AUX IN jack.
-     */
-    private fun ampOutput(): AudioDeviceInfo? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
-        val outs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        return outs.firstOrNull {
-            it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-                it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-                it.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
-        } ?: outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
-    }
-
-    /** True if an amp audio route (USB or BT-DUAL) is available right now. */
-    fun ampAudioAvailable(): Boolean = ampOutput() != null
-
-    /** Force MP3 output to the amp's audio route when requested and available. */
-    private fun applyPreferredOutput(mp: MediaPlayer) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val target = if (jamThroughAmp) ampOutput() else null
-        runCatching { mp.setPreferredDevice(target) }
-    }
-
-    private fun audioTypeName(type: Int): String = when (type) {
-        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET,
-        AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB(комбик)"
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "динамик"
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> "наушники"
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth"
-        else -> "тип$type"
-    }
-    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private var focusRequest: AudioFocusRequest? = null
-
-    private fun requestAudioFocus() {
-        abandonAudioFocus() // release any previous request first
-        val attrs = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build()
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(attrs)
-                    .setWillPauseWhenDucked(false)
-                    .build()
-                focusRequest = req
-                audioManager.requestAudioFocus(req)
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.requestAudioFocus(
-                    null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
-                )
-            }
-        }
-    }
-
-    private fun abandonAudioFocus() {
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
-            } else {
-                @Suppress("DEPRECATION") audioManager.abandonAudioFocus(null)
-            }
-        }
-        focusRequest = null
-    }
 
     init {
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
         refreshDevices()
         refreshPatches()
         tracks.addAll(trackStore.list())
+        jam.onLog = { line -> logAction("", line) }
+        lastCrash = KatanaApplication.lastCrash(app)
     }
+
+    fun dismissCrashReport() {
+        KatanaApplication.clearCrash(app)
+        lastCrash = null
+    }
+
+    /** The track currently loaded in the player, as an index into [tracks]. */
+    val currentTrack: Int?
+        get() = jam.trackUri?.let { uri -> tracks.indexOfFirst { it.uri == uri }.takeIf { it >= 0 } }
 
     // --- Device discovery / connection -----------------------------------
     fun refreshDevices() {
         devices.clear()
-        usbManager.deviceList.values
-            .filter { it.vendorId == ROLAND_VENDOR_ID }
+        val found = runCatching { usbManager.deviceList.values.toList() }.getOrDefault(emptyList())
+        found.filter { it.vendorId == ROLAND_VENDOR_ID }
             .forEach {
                 devices.add(
                     DeviceInfo(
@@ -225,22 +139,48 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                     ),
                 )
             }
-        if (devices.isEmpty()) {
+        if (devices.isEmpty() && !connected) {
             status = "Устройство Roland не найдено. Включи комбик, удерживая [BOOSTER], и подключи кабель."
         }
     }
 
     fun hasPermission(device: UsbDevice): Boolean = usbManager.hasPermission(device)
 
+    // --- Auto-reconnect ---------------------------------------------------
+    // A USB-C phone connector under a guitar cable's worth of tugging drops the
+    // link regularly, and the app used to just sit there saying "отключён"
+    // until you noticed and re-tapped Подключить. Now it comes back by itself.
+    private var lastDevice: UsbDevice? = null
+    private var autoReconnect = true
+    private var reconnectAttempts = 0
+    private val reconnectRunnable = Runnable { attemptReconnect() }
+    private val noResponseRunnable = Runnable {
+        if (connected && !gotData) {
+            noResponse = true
+            appendLog(
+                "⚠ Нет данных от комбика. 1) Проверь, что он включён с зажатым [BOOSTER] " +
+                    "(режим USB-MIDI). 2) Покрути любую ручку на самом комбике — приложение " +
+                    "выучит правильный заголовок Gen 3 из его ответа.",
+            )
+        }
+    }
+
     fun connect(device: UsbDevice) {
-        disconnect()
+        teardown()
+        autoReconnect = true
+        lastDevice = device
         val conn = UsbMidiConnection(usbManager, device)
         val ctl = KatanaController(conn)
         ctl.onTraffic = { dir, sysex ->
             bumpCount(dir == "RX")
             appendLog("$dir  ${KatanaSysEx.toHex(sysex)}")
         }
-        ctl.onIncoming = { incoming -> onMain { if (!gotData) gotData = true; applyIncoming(incoming) } }
+        ctl.onIncoming = { incoming ->
+            onMain {
+                if (!gotData) { gotData = true; reconnectAttempts = 0 }
+                applyIncoming(incoming)
+            }
+        }
         ctl.onInfo = { msg -> appendLog(msg) }
         ctl.onSelectors = { sel ->
             logAction("gen3sel", "Gen3 FX-BOX слоты: booster=${sel[0]} mod=${sel[1]} " +
@@ -268,6 +208,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                     appendLog("— соединение потеряно —")
                     Thread { runCatching { dead?.shutdown() }; runCatching { conn.close() } }
                         .apply { isDaemon = true }.start()
+                    scheduleReconnect()
                 }
             }
         }
@@ -275,6 +216,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         if (error != null) {
             status = "Не удалось подключиться: $error"
             connected = false
+            scheduleReconnect()
             return
         }
         connection = conn
@@ -288,29 +230,66 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         appendLog("USB: ${conn.diagnostics}")
         appendLog("— рукопожатие + автоопределение диалекта —")
         ctl.begin()
-        // After the handshake + model-id sweep, if we still have no real data
-        // the amp is either not in USB-MIDI mode or needs a physical knob nudge.
-        mainHandler.postDelayed({
-            if (connected && !gotData) {
-                noResponse = true
-                appendLog(
-                    "⚠ Нет данных от комбика. 1) Проверь, что он включён с зажатым [BOOSTER] " +
-                        "(режим USB-MIDI). 2) Покрути любую ручку на самом комбике — приложение " +
-                        "выучит правильный заголовок Gen 3 из его ответа.",
-                )
-            }
-        }, 6000)
+        // After the handshake, if we still have no real data the amp is either
+        // not in USB-MIDI mode or needs a physical knob nudge.
+        mainHandler.removeCallbacks(noResponseRunnable)
+        mainHandler.postDelayed(noResponseRunnable, NO_RESPONSE_MS)
     }
 
+    private fun scheduleReconnect() {
+        if (!autoReconnect) return
+        if (lastDevice == null) return
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            status = "Связь потеряна. Проверь кабель и нажми «Обновить список»."
+            return
+        }
+        reconnectAttempts++
+        val delay = RECONNECT_STEP_MS * reconnectAttempts
+        status = "Переподключение через ${delay / 1000} с (попытка $reconnectAttempts)…"
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.postDelayed(reconnectRunnable, delay)
+    }
+
+    private fun attemptReconnect() {
+        if (!autoReconnect || connected) return
+        val wanted = lastDevice ?: return
+        refreshDevices()
+        // Re-plugging gives the amp a new UsbDevice instance, so match on the
+        // stable device name rather than on object identity.
+        val fresh = devices.firstOrNull { it.device.deviceName == wanted.deviceName }?.device
+        when {
+            fresh == null -> scheduleReconnect()
+            !usbManager.hasPermission(fresh) -> {
+                status = "Комбик найден, но нужно разрешение USB — нажми «Подключить»."
+                appendLog("— переподключение: нет разрешения USB —")
+            }
+            else -> {
+                appendLog("— автопереподключение (попытка $reconnectAttempts) —")
+                connect(fresh)
+            }
+        }
+    }
+
+    /** User-initiated disconnect: stop trying to come back. */
     fun disconnect() {
+        autoReconnect = false
+        reconnectAttempts = 0
+        mainHandler.removeCallbacks(reconnectRunnable)
+        val was = connected
+        teardown()
+        if (was) appendLog("— отключено —")
+        status = "Не подключено"
+    }
+
+    /** Close the link without touching the auto-reconnect decision. */
+    private fun teardown() {
+        mainHandler.removeCallbacks(noResponseRunnable)
         controller?.shutdown()
         controller = null
         connection?.close()
         connection = null
-        if (connected) appendLog("— отключено —")
         connected = false
         connectedLabel = ""
-        status = "Не подключено"
     }
 
     // --- Action log (what the user pressed, address used, sent or not) ----
@@ -331,7 +310,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     fun clearActionLog() = synchronized(actionLog) { actionLog.clear(); lastActionKey = "" }
 
     fun actionLogText(): String = buildString {
-        append("Katana Ctl — журнал действий\n")
+        append("$APP_NAME — журнал действий\n")
         append("Подключено: $connected ($connectedLabel)  ID: ${identityInfo.ifEmpty { "—" }}\n")
         append("Профиль: ${KatanaSysEx.generation}  заголовок ${KatanaSysEx.headerHex()}\n")
         append("TX=${txAtomic.get()} RX=${rxAtomic.get()}\n----\n")
@@ -352,7 +331,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Controls ---------------------------------------------------------
     fun setParam(param: KatanaParam, value: Int) {
-        val stored = if (param.kind == ParamKind.ENUM) value else value.coerceIn(param.min, param.max)
+        val stored = KatanaParams.sanitize(param, value)
         paramValues[param.id] = stored
         controller?.setParam(param, stored)
         val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
@@ -450,22 +429,38 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         refreshPatches()
     }
 
+    /**
+     * Load a patch: knobs and types first, on/off switches last, as one atomic
+     * batch (see [KatanaController.applyPreset]). The whole parameter set is
+     * always sent — a patch never inherits anything from the previous tone.
+     */
     fun applyPatch(patch: Patch) {
-        val ctl = controller
-        var sent = 0
-        patch.values.forEach { (id, value) ->
-            val param = KatanaParams.BY_ID[id] ?: return@forEach
-            val stored = if (param.kind == ParamKind.ENUM) value else value.coerceIn(param.min, param.max)
-            paramValues[param.id] = stored
-            // Paced single-slot batch write — avoids flooding the amp's MIDI
-            // buffer (which made only the first 1–2 presets land).
-            ctl?.applyParam(param, stored)
-            sent++
-        }
+        val entries = FactoryPresets.loadOrder(patch.values)
+        // Reflect it locally first so the UI is right even with no cable.
+        entries.forEach { (p, v) -> paramValues[p.id] = v }
         activePreset = patch.name
-        appendLog("— применён пресет '${patch.name}' ($sent параметров) —")
-        logAction("", "Пресет загружен: ${patch.name}  " +
-            "${if (ctl == null) "(нет связи)" else "(отправлено $sent параметров)"}")
+        val ctl = controller
+        val missing = KatanaParams.ALL.size - entries.size
+        if (ctl == null) {
+            presetStatus = "«${patch.name}»: нет связи — значения только в приложении"
+            logAction("", "Пресет '${patch.name}': нет связи (${entries.size} параметров локально)")
+            return
+        }
+        presetLoading = patch.name
+        presetStatus = "Загружаю «${patch.name}»…"
+        appendLog("— применяю пресет '${patch.name}' (${entries.size} параметров) —")
+        ctl.applyPreset(entries) { sent, total ->
+            onMain {
+                presetLoading = null
+                presetStatus = if (sent == total) {
+                    "Загружен: «${patch.name}» ($sent сообщений)"
+                } else {
+                    "«${patch.name}» прерван на $sent из $total — загрузи ещё раз"
+                }
+                logAction("", "Пресет '${patch.name}': отправлено $sent из $total сообщений" +
+                    if (missing > 0) " (нет значений для $missing параметров)" else "")
+            }
+        }
     }
 
     fun deletePatch(name: String) {
@@ -483,119 +478,21 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "track"
         if (tracks.none { it.uri == uri.toString() }) {
             tracks.add(Track(uri.toString(), name))
-            trackStore.saveAll(tracks.toList())
-            jamStatus = "Добавлен: $name"
-        } else {
-            jamStatus = "Уже в списке: $name"
+            runCatching { trackStore.saveAll(tracks.toList()) }
         }
         logAction("", "Джем: добавлен трек «$name»")
     }
 
-    fun changeMp3Volume(v: Float) {
-        mp3Volume = v.coerceIn(0f, 1f)
-        runCatching { player?.setVolume(mp3Volume, mp3Volume) }
-    }
-
     fun removeTrack(index: Int) {
-        if (index !in tracks.indices) return
-        if (currentTrack == index) stopPlayback()
+        val t = tracks.getOrNull(index) ?: return
+        if (jam.trackUri == t.uri) jam.stop()
         tracks.removeAt(index)
-        trackStore.saveAll(tracks.toList())
-        if (currentTrack != null && currentTrack!! >= tracks.size) currentTrack = null
+        runCatching { trackStore.saveAll(tracks.toList()) }
     }
 
     fun playTrack(index: Int) {
-        if (index !in tracks.indices) return
-        releasePlayer()
-        val t = tracks[index]
-        // Note: don't use MediaPlayer().apply { } here — inside `apply` the
-        // receiver is the MediaPlayer, whose read-only `isPlaying` would shadow
-        // our own state property. Configure via an explicit local instead.
-        val mp = MediaPlayer()
-        mp.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build(),
-        )
-        mp.setOnPreparedListener { p ->
-            durationMs = p.duration
-            p.isLooping = looping
-            requestAudioFocus()
-            applyPreferredOutput(p)
-            runCatching { p.setVolume(mp3Volume, mp3Volume) }
-            p.start()
-            applySpeed(p) // after start() — setting speed pre-start throws on some devices
-            isPlaying = true
-            val amp = ampOutput()
-            val out = when {
-                jamThroughAmp && amp != null -> "комбик (${audioTypeName(amp.type)})"
-                amp != null -> "динамик (комбик доступен — включи «через комбик»)"
-                else -> "динамик · комбик не виден как аудио (нужен Generic-режим/BT-DUAL/AUX — см. «Как вывести звук в комбик»)"
-            }
-            jamStatus = "Играет: ${t.name} · $out"
-            logAction("", "Джем: играет «${t.name}» (${durationMs / 1000}с, громкость ${(mp3Volume * 100).toInt()}%, выход: $out; все выходы: ${audioOutputs()})")
-        }
-        mp.setOnCompletionListener {
-            if (!looping) { isPlaying = false; positionMs = durationMs; abandonAudioFocus() }
-        }
-        mp.setOnErrorListener { _, what, extra ->
-            isPlaying = false
-            jamStatus = "Ошибка воспроизведения ($what/$extra). Попробуй другой файл."
-            logAction("", "Джем: ОШИБКА воспроизведения «${t.name}» (код $what/$extra)")
-            releasePlayer(); abandonAudioFocus()
-            true
-        }
-        player = mp
-        currentTrack = index
-        positionMs = 0
-        jamStatus = "Загрузка: ${t.name}…"
-        logAction("", "Джем: запуск «${t.name}»")
-        runCatching {
-            mp.setDataSource(app, Uri.parse(t.uri))
-            mp.prepareAsync()
-        }.onFailure {
-            isPlaying = false
-            jamStatus = "Не удалось открыть файл: ${it.message}"
-            logAction("", "Джем: ошибка открытия «${t.name}»: ${it.message} " +
-                "(возможно, потерян доступ к файлу — добавь его заново)")
-        }
-    }
-
-    fun togglePlayPause() {
-        val mp = player
-        if (mp == null) { currentTrack?.let { playTrack(it) } ?: tracks.indices.firstOrNull()?.let { playTrack(it) }; return }
-        // MediaPlayer throws IllegalStateException if called in a bad state.
-        runCatching {
-            if (mp.isPlaying) { mp.pause(); isPlaying = false } else { mp.start(); isPlaying = true }
-        }
-    }
-
-    fun stopPlayback() {
-        releasePlayer(); isPlaying = false; positionMs = 0; abandonAudioFocus()
-    }
-
-    fun seekTo(ms: Int) {
-        runCatching { player?.seekTo(ms.coerceIn(0, durationMs)); positionMs = ms }
-    }
-
-    fun toggleLoop() {
-        looping = !looping; runCatching { player?.isLooping = looping }
-    }
-
-    fun cycleSpeed() {
-        speed = when (speed) { 1.0f -> 0.75f; 0.75f -> 0.5f; 0.5f -> 1.25f; else -> 1.0f }
-        val mp = player ?: return
-        runCatching { if (mp.isPlaying) applySpeed(mp) }
-    }
-
-    /** Called from the UI to refresh the seek position while playing. */
-    fun refreshPosition() {
-        runCatching { player?.let { if (it.isPlaying) positionMs = it.currentPosition } }
-    }
-
-    private fun applySpeed(mp: MediaPlayer) {
-        runCatching { mp.playbackParams = mp.playbackParams.setSpeed(speed) }
+        val t = tracks.getOrNull(index) ?: return
+        jam.play(t.uri, t.name)
     }
 
     private fun queryDisplayName(uri: Uri): String? =
@@ -604,21 +501,18 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                 ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
         }.getOrNull()
 
-    private fun releasePlayer() {
-        runCatching { player?.release() }
-        player = null
-    }
-
     // --- Log --------------------------------------------------------------
     fun clearLog() = synchronized(log) { log.clear() }
 
     /** Full log as shareable text (for sending diagnostics). */
     fun logText(): String = buildString {
-        append("Katana Ctl — диагностика\n")
+        append("$APP_NAME — диагностика\n")
         append("Подключено: $connected  ($connectedLabel)\n")
         append("ID: ${identityInfo.ifEmpty { "—" }}\n")
         append("TX=${txAtomic.get()}  RX=${rxAtomic.get()}  noResponse=$noResponse\n")
         append("Профиль modelId=0x%02X\n".format(KatanaSysEx.modelId))
+        append("Звук: выход=${jam.output.label} маршрут=${jam.routeLabel}\n")
+        lastCrash?.let { append("--- последний сбой ---\n$it\n") }
         append("----\n")
         append(synchronized(log) { log.joinToString("\n") })
     }
@@ -635,12 +529,20 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        releasePlayer()
-        disconnect()
+        // The player deliberately outlives the ViewModel: the Activity being
+        // recreated (rotation, USB attach intent) must not cut the track off.
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.removeCallbacks(noResponseRunnable)
+        autoReconnect = false
+        teardown()
         super.onCleared()
     }
 
     companion object {
+        const val APP_NAME = "Katana by Vlad_i_c"
         private const val MAX_LOG_LINES = 400
+        private const val NO_RESPONSE_MS = 6_000L
+        private const val RECONNECT_STEP_MS = 1_500L
+        private const val MAX_RECONNECT_ATTEMPTS = 5
     }
 }

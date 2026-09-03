@@ -1,5 +1,9 @@
 package com.raznoe.katana.model
 
+import com.raznoe.katana.protocol.KatanaParam
+import com.raznoe.katana.protocol.KatanaParams
+import com.raznoe.katana.protocol.ParamKind
+
 /**
  * Built-in presets, two groups:
  *  • ORIGINALS (★) — REAL demo patches decoded from the Katana Librarian's
@@ -9,19 +13,148 @@ package com.raznoe.katana.model
  *  • My own re-creations — starting-point tones I voiced (noise-gated, loudness
  *    leveled). Marked "Моя версия" in their note.
  *
- * Values reference [com.raznoe.katana.protocol.KatanaParams] ids and use the
- * community MkII wire values. Amp type indices: 0 Acoustic, 1 Clean, 2 Pushed,
- * 3 Crunch, 4 Lead, 5 Brown.
+ * Values reference [KatanaParams] ids and use the community MkII wire values.
+ * Amp type indices: 0 Acoustic, 1 Clean, 2 Pushed, 3 Crunch, 4 Lead, 5 Brown.
+ *
+ * EVERY preset here goes through [finish], which guarantees three things that
+ * the earlier hand-written maps did not:
+ *
+ *  1. **Completeness.** A preset carries a value for every parameter in
+ *     [KatanaParams.ALL]. Loading one used to send only the parameters it
+ *     happened to mention, so the rest of the tone was inherited from whatever
+ *     was loaded before — presets "didn't really load", and stray effects from
+ *     the previous patch kept making noise underneath.
+ *  2. **Validity.** Every value is a code the amp implements (see
+ *     [KatanaParams.sanitize]); enum lists have gaps and an unimplemented code
+ *     leaves a block in an undefined state.
+ *  3. **A quiet noise floor** (see [polish]): a firm gate on every tone, a
+ *     ceiling on gain/presence, a high cut in the wet path, full dry signal
+ *     through delay/reverb, and Mod/FX blocks left off unless their type is one
+ *     we can actually configure.
  */
 object FactoryPresets {
 
-    private class Builder {
-        val v = LinkedHashMap<String, Int>().apply {
-            // deterministic baseline: everything off unless a preset enables it
-            put("boost_sw", 0); put("boost_solo", 0)
-            put("mod_sw", 0); put("fx_sw", 0)
-            put("delay_sw", 0); put("reverb_sw", 0); put("ns_sw", 0)
+    /**
+     * Mod/FX types that are safe to switch ON.
+     *
+     * Only a block's TYPE and on/off are implemented for Gen 3 — its per-type
+     * parameters are not in our address map yet. Enabling a block whose type we
+     * cannot configure means the amp applies whatever the previous patch left
+     * in those parameters, and types like Wave Synth / Ring Mod / Humanizer /
+     * Slicer / Slow Gear then generate exactly the "посторонний фон" this list
+     * exists to prevent. Types here are either time-domain effects that sound
+     * musical at any setting, or utility blocks that are quiet by nature.
+     */
+    private val SAFE_MOD_FX = setOf(
+        3,  // Comp
+        4,  // Limiter
+        6,  // Graphic EQ
+        9,  // Guitar Sim
+        19, // Phaser
+        20, // Flanger
+        21, // Tremolo
+        22, // Rotary
+        23, // Uni-V
+        26, // Vibrato
+        29, // Chorus
+        31, // AC Guitar Sim
+    )
+
+    // ---- Finishing pipeline ---------------------------------------------
+
+    /**
+     * Expand [raw] to the full parameter set, make every value legal, then
+     * quiet the tone down and level its loudness.
+     */
+    private fun finish(name: String, note: String, raw: Map<String, Int>): Patch {
+        val v = LinkedHashMap<String, Int>()
+        // 1) Full, deterministic baseline — nothing is left to the previous patch.
+        for (p in KatanaParams.ALL) v[p.id] = KatanaParams.neutral(p)
+        // 2) The preset's own values on top (unknown ids are dropped, not sent).
+        for ((id, value) in raw) if (KatanaParams.BY_ID[id] != null) v[id] = value
+        // 3) Legal values, quiet noise floor, matched loudness.
+        sanitize(v)
+        polish(v)
+        v["volume"] = normalizedLevel(v)
+        sanitize(v) // polish/level results are clamped too
+        return Patch(name = name, values = v, note = note)
+    }
+
+    private fun sanitize(v: LinkedHashMap<String, Int>) {
+        for ((id, value) in v.entries.toList()) {
+            val p: KatanaParam = KatanaParams.BY_ID[id] ?: continue
+            v[id] = KatanaParams.sanitize(p, value)
         }
+    }
+
+    /**
+     * Everything that makes a preset sound clean rather than hissy.
+     *
+     * The Katana's own noise floor plus single-coil hum is what the user hears
+     * as "фон" between notes; a high-gain patch with the gate off, presence
+     * maxed and a bright delay/reverb tail amplifies all of it.
+     */
+    private fun polish(v: LinkedHashMap<String, Int>) {
+        // Runaway gain past ~82 is mostly compression and hiss, not more tone.
+        v["gain"] = (v["gain"] ?: 50).coerceAtMost(MAX_GAIN)
+        // Presence/treble ceilings: this is where fizz and hiss live.
+        v["presence"] = (v["presence"] ?: 50).coerceAtMost(85)
+        v["treble"] = (v["treble"] ?: 50).coerceAtMost(88)
+        // A booster running at 100 slams the amp input; back it off a touch.
+        v["boost_level"] = (v["boost_level"] ?: 70).coerceAtMost(88)
+
+        // Mod/FX: only switch on a block we can actually configure (see above).
+        if ((v["mod_type"] ?: -1) !in SAFE_MOD_FX) v["mod_sw"] = 0
+        if ((v["fx_type"] ?: -1) !in SAFE_MOD_FX) v["fx_sw"] = 0
+
+        // Wet path: tame the top of the repeats/tail, keep rumble out of the
+        // reverb, and never let the dry guitar drop out of the mix.
+        if ((v["delay_sw"] ?: 0) == 1) {
+            v["delay_hc"] = (v["delay_hc"] ?: 12).coerceAtMost(12)   // ≤ 10 kHz
+            v["delay_direct"] = 100
+        }
+        if ((v["reverb_sw"] ?: 0) == 1) {
+            v["reverb_hc"] = (v["reverb_hc"] ?: 11).coerceAtMost(11) // ≤ 8 kHz
+            v["reverb_lc"] = (v["reverb_lc"] ?: 6).coerceAtLeast(4)  // ≥ 40 Hz
+            v["reverb_direct"] = 100
+        }
+
+        gate(v)
+    }
+
+    /**
+     * Engage the Noise Suppressor on EVERY preset and scale its threshold with
+     * how hot the tone is.
+     *
+     * The old rule only gated tones with gain ≥ 45 (or a booster), which left
+     * every clean and low-gain preset humming — and several imported demo
+     * patches shipped with the gate switched off entirely. We only ever RAISE
+     * the threshold, so a preset that already gates harder keeps its setting.
+     */
+    private fun gate(v: LinkedHashMap<String, Int>) {
+        val gain = v["gain"] ?: 0
+        val boosted = (v["boost_sw"] ?: 0) == 1
+        v["ns_sw"] = 1
+        var want = 18 + (gain * 45 / 100)
+        if (boosted) want += 4 + (v["boost_drive"] ?: 0) * 8 / 100
+        want = want.coerceIn(MIN_GATE, MAX_GATE)
+        if ((v["ns_thr"] ?: 0) < want) v["ns_thr"] = want
+        // Release below ~35 chatters on decaying notes; above ~70 it swallows them.
+        v["ns_rel"] = (v["ns_rel"] ?: 45).coerceIn(35, 70)
+    }
+
+    /** Approximate equal-loudness amp Level from gain + boost drive/level. */
+    private fun normalizedLevel(v: Map<String, Int>): Int {
+        val gain = v["gain"] ?: 50
+        val boostOn = (v["boost_sw"] ?: 0) == 1
+        val boostLvl = if (boostOn) v["boost_level"] ?: 0 else 0
+        val boostDrive = if (boostOn) v["boost_drive"] ?: 0 else 0
+        val lvl = 96 - (gain * 0.28).toInt() - (boostLvl * 0.12).toInt() - (boostDrive * 0.10).toInt()
+        return lvl.coerceIn(MIN_LEVEL, MAX_LEVEL)
+    }
+
+    private class Builder {
+        val v = LinkedHashMap<String, Int>()
 
         fun amp(type: Int, gain: Int, bass: Int, mid: Int, treble: Int, pres: Int, vol: Int = 80) {
             v["amp_type"] = type; v["gain"] = gain; v["volume"] = vol
@@ -51,64 +184,38 @@ object FactoryPresets {
 
     private fun preset(name: String, note: String, build: Builder.() -> Unit): Patch {
         val b = Builder(); b.build()
-        cleanUp(b.v)
-        // Loudness leveling: hotter tones (high gain / boost) put out much more
-        // signal, so we trim the amp Level per preset to roughly equalize how
-        // loud each preset sounds. This is an approximation, not metered LUFS —
-        // fine-tune Volume on the Патч tab if a tone is still off.
-        b.v["volume"] = normalizedLevel(b.v)
-        return Patch(name = name, values = b.v, note = note)
-    }
-
-    /**
-     * Engage the Noise Suppressor and raise its threshold to a sensible minimum
-     * on any overdriven/boosted tone. High-gain guitar picks up mains hum + pickup
-     * hiss; without a firm gate the preset "фонит". We only ever RAISE the
-     * threshold (never weaken a preset that already gates harder) and set a snappy
-     * release, leaving clean/low-gain tones untouched.
-     */
-    private fun gate(v: LinkedHashMap<String, Int>) {
-        val gain = v["gain"] ?: 0
-        val boosted = (v["boost_sw"] ?: 0) == 1
-        if (gain >= 45 || boosted) {
-            v["ns_sw"] = 1
-            val want = (26 + (gain - 45) * 6 / 10).coerceIn(26, 62)
-            if ((v["ns_thr"] ?: 0) < want) v["ns_thr"] = want
-            if ((v["ns_rel"] ?: 0) <= 0) v["ns_rel"] = 45
-        }
-    }
-
-    /** For my own re-creations: trim runaway gain a touch, then gate. */
-    private fun cleanUp(v: LinkedHashMap<String, Int>) {
-        if ((v["gain"] ?: 0) > 82) v["gain"] = 82
-        gate(v)
-    }
-
-    /** Approximate equal-loudness amp Level from gain + boost drive/level. */
-    private fun normalizedLevel(v: Map<String, Int>): Int {
-        val gain = v["gain"] ?: 50
-        val boostOn = (v["boost_sw"] ?: 0) == 1
-        val boostLvl = if (boostOn) v["boost_level"] ?: 0 else 0
-        val boostDrive = if (boostOn) v["boost_drive"] ?: 0 else 0
-        val lvl = 96 - (gain * 0.28).toInt() - (boostLvl * 0.12).toInt() - (boostDrive * 0.10).toInt()
-        return lvl.coerceIn(45, 95)
+        return finish(name, note, b.v)
     }
 
     private const val N = "Моя версия (не оригинал JNs)"
+
+    /** Gain ceiling; past this it is hiss and compression, not tone. */
+    private const val MAX_GAIN = 82
+    private const val MIN_GATE = 22
+    private const val MAX_GATE = 62
+    private const val MIN_LEVEL = 55
+    private const val MAX_LEVEL = 92
+
+    /** Parameters that are safe to send only after the tone is set up. */
+    private val LOAD_ORDER: List<KatanaParam> =
+        KatanaParams.ALL.filter { it.kind != ParamKind.TOGGLE } +
+            KatanaParams.ALL.filter { it.kind == ParamKind.TOGGLE }
+
+    /**
+     * The order to write a patch in: every knob and type first, then the on/off
+     * switches. Bringing a block in only once its parameters are set avoids the
+     * burst of noise you get when, say, Delay switches on while its Level is
+     * still at the previous patch's value.
+     */
+    fun loadOrder(values: Map<String, Int>): List<Pair<KatanaParam, Int>> =
+        LOAD_ORDER.mapNotNull { p -> values[p.id]?.let { p to KatanaParams.sanitize(p, it) } }
 
     // ---- Real factory/demo patches decoded from the Katana Librarian's
     //      bundled .kat files (BOSS demo set + JuCaNeRy "JNs" demos). These are
     //      the ORIGINAL values (gain/EQ/levels/effects), not re-creations. Amp
     //      TYPE is mapped from the MkII code to the nearest Gen 3 amp model.
-    private fun orig(name: String, values: Map<String, Int>): Patch {
-        val v = LinkedHashMap(values)
-        gate(v) // keep the original tone, just ensure hum is gated
-        // Some demo patches ship with a very low amp Level (e.g. ACDC = 21) and
-        // sound "broken"/silent when recalled. Clamp into an audible, balanced
-        // band so every preset is usable without wildly uneven loudness.
-        v["volume"] = (v["volume"] ?: 70).coerceIn(55, 90)
-        return Patch(name = name, values = v, note = "Оригинал (демо BOSS / JuCaNeRy)")
-    }
+    private fun orig(name: String, values: Map<String, Int>): Patch =
+        finish(name, "Оригинал (демо BOSS / JuCaNeRy)", values)
 
     val ORIGINALS: List<Patch> = listOf(
         orig("★ GMoore Solo", mapOf(

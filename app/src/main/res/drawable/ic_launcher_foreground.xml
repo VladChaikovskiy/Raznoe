@@ -1,16 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Schecter-style electric guitar (C-series double-cutaway with the pointed
+    3+3 headstock), drawn diagonally so a long instrument fills a round icon.
+
+    The whole thing is one group: the art is authored upright at full viewport
+    scale, then rotated and scaled into the adaptive-icon safe zone (a 66dp
+    circle in the middle of 108dp) so no launcher shape can clip the headstock
+    or the body's lower horn.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Stylised katana blade on the adaptive-icon safe zone. -->
-    <path
-        android:fillColor="#E23B2E"
-        android:pathData="M74,30 L78,34 L44,68 L40,64 Z" />
-    <path
-        android:fillColor="#F2F2F2"
-        android:pathData="M40,64 L44,68 L38,74 L34,70 Z" />
-    <path
-        android:fillColor="#9AA0A6"
-        android:pathData="M33,71 L37,75 L31,81 L29,79 C28,78 28,76 29,75 Z" />
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-32"
+        android:scaleX="0.7"
+        android:scaleY="0.7">
+
+        <!-- Neck, drawn first so the body covers its heel. -->
+        <path
+            android:fillColor="#C98A4B"
+            android:pathData="M51.4,63 L56.6,63 L56,25 L52,25 Z" />
+
+        <!-- Pointed Schecter headstock. -->
+        <path
+            android:fillColor="#C98A4B"
+            android:pathData="M52,25 L46.5,21 L44.5,12.5 L49,7.5 L59,7.5 L63.5,12.5 L61.5,21 L56,25 Z" />
+
+        <!-- Rosewood fretboard. -->
+        <path
+            android:fillColor="#241F1D"
+            android:pathData="M52.2,60 L55.8,60 L55.4,27 L52.6,27 Z" />
+
+        <!-- Tuners, 3 a side. -->
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M45.6,19 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M44.8,15.2 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M45.2,11.4 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M59.6,19 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M60.4,15.2 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+        <path
+            android:fillColor="#E9E9EC"
+            android:pathData="M60,11.4 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+
+        <!-- Solid body: sharp upper horns, deep cutaways. -->
+        <path
+            android:fillColor="#E23B2E"
+            android:pathData="M34,56 C28,60 24.5,66 25,72 C25.5,80.5 30,88.5 38,91.5 C45.5,94.5 62.5,94.5 70,91.5 C78,88.5 82.5,80.5 83,72 C83.5,66 80,60 74,56 C70,60.5 66,62.5 60,63 L48,63 C42,62.5 38,60.5 34,56 Z" />
+
+        <!-- Two humbuckers + bridge. -->
+        <path
+            android:fillColor="#1A1C20"
+            android:pathData="M43,65.5 L65,65.5 L65,71 L43,71 Z" />
+        <path
+            android:fillColor="#1A1C20"
+            android:pathData="M43,74 L65,74 L65,79.5 L43,79.5 Z" />
+        <path
+            android:fillColor="#C9CCD1"
+            android:pathData="M45,83.5 L63,83.5 L63,87.5 L45,87.5 Z" />
+    </group>
 </vector>
