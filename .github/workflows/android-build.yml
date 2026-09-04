@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Needed to publish the APK as a release asset (see the last step).
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,3 +42,27 @@ jobs:
           name: katana-by-vlad-i-c-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # An Actions artifact can only be downloaded by someone signed in to
+      # GitHub, which is useless on the phone the app is meant to be installed
+      # on. A release asset on a public repo needs no sign-in, and the tag is
+      # fixed so the download link never changes:
+      #   .../releases/download/apk-latest/katana-by-vlad-i-c.apk
+      # The release is recreated each build so its tag points at the commit the
+      # APK was actually built from.
+      - name: Publish APK to the apk-latest release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/debug/app-debug.apk katana-by-vlad-i-c.apk
+          notes="Последний APK: ветка \`${{ github.ref_name }}\`, коммит \`${GITHUB_SHA:0:7}\`.
+
+          Скачивай **katana-by-vlad-i-c.apk** прямо с этой страницы — вход в GitHub не нужен.
+          На телефоне разреши установку из неизвестных источников."
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest katana-by-vlad-i-c.apk \
+            --title "Katana by Vlad_i_c — последний APK" \
+            --notes "$notes" \
+            --target "$GITHUB_SHA"
