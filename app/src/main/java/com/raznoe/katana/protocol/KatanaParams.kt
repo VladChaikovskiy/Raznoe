@@ -143,16 +143,44 @@ object KatanaParams {
     private const val REV = "Reverb"
     private const val NS = "Noise Suppressor"
 
-    // ---- Amp panel. MkII offsets provisional; Gen 3 addresses decoded from
-    //      the Katana Librarian app (section AMP, base 0x2000 06 xx). --------
+    // ---- Amp panel -------------------------------------------------------
+    //
+    // The Gen 3 addresses are the AMP section (base 1536 in the Katana
+    // Librarian's `m` enum) run through the app's own address arithmetic, which
+    // gives 20 00 06 00 for index 0, 06 01 for index 1 and so on.
+    //
+    // WHICH parameter sits at which index was the bug. The map used to put gain
+    // at index 0 and the amp TYPE at index 7 — an order that matches nothing.
+    // The only confirmed ordering for this section is MkII's, where the block
+    // is type, gain, volume, bass, middle, treble, presence at offsets 0..6
+    // (00 00 04 21..27), and BOSS keeps parameter order stable inside a section
+    // across generations. So the whole amp block was written one slot low:
+    //
+    //   our gain    -> the TYPE byte      (a value of 47..93 for a list of six,
+    //                                      so every preset clamped to the same
+    //                                      character — "presets do nothing",
+    //                                      and if that clamp is Acoustic, an
+    //                                      electric guitar through an acoustic
+    //                                      simulator is exactly the boomy,
+    //                                      window-rattling low end reported)
+    //   our volume  -> gain
+    //   our bass    -> volume
+    //   our middle  -> bass
+    //   our treble  -> middle
+    //   our presence-> treble
+    //   our type    -> index 7, nothing
+    //
+    // Now aligned to the MkII order. To confirm on hardware: Диагностика →
+    // Снимок → turn the amp's own Gain knob → Прочитать → Сравнить. Gain must
+    // report at 20 00 06 01.
     val AMP_TYPE = enum("amp_type", "Тип усилителя", AMP, a(0x00, 0x00, 0x04, 0x21),
-        AMP_TYPES.mapIndexed { i, s -> s to i }, g3 = a(0x20, 0x00, 0x06, 0x07))
-    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x22), g3 = a(0x20, 0x00, 0x06, 0x00))
-    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x23), g3 = a(0x20, 0x00, 0x06, 0x01))
-    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x24), g3 = a(0x20, 0x00, 0x06, 0x02))
-    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x25), g3 = a(0x20, 0x00, 0x06, 0x03))
-    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x04))
-    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), g3 = a(0x20, 0x00, 0x06, 0x05))
+        AMP_TYPES.mapIndexed { i, s -> s to i }, g3 = a(0x20, 0x00, 0x06, 0x00))
+    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x22), g3 = a(0x20, 0x00, 0x06, 0x01))
+    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x23), g3 = a(0x20, 0x00, 0x06, 0x02))
+    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x24), g3 = a(0x20, 0x00, 0x06, 0x03))
+    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x25), g3 = a(0x20, 0x00, 0x06, 0x04))
+    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x05))
+    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), g3 = a(0x20, 0x00, 0x06, 0x06))
 
     // ---- Booster (60 00 00 30); Gen 3 on/off in section SW ---------------
     val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30),
