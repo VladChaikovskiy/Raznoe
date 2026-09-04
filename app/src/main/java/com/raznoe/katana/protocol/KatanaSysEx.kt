@@ -121,6 +121,24 @@ object KatanaSysEx {
         return intArrayOf((a shr 24) and 0x7F, (a shr 16) and 0x7F, (a shr 8) and 0x7F, a and 0x7F)
     }
 
+    /**
+     * The address [delta] bytes past [addr].
+     *
+     * Roland addresses are 7 bits per byte, so byte 0x7F + 1 is 0x00 in the
+     * next byte up, not 0x80. The diagnostics screen needs this to report the
+     * real address of a byte that changed inside a block it read.
+     */
+    fun addrPlus(addr: IntArray, delta: Int): IntArray {
+        require(addr.size == 4) { "Katana address must be 4 bytes" }
+        var flat = 0
+        for (b in addr) flat = (flat shl 7) or (b and 0x7F)
+        flat += delta
+        return intArrayOf(
+            (flat shr 21) and 0x7F, (flat shr 14) and 0x7F,
+            (flat shr 7) and 0x7F, flat and 0x7F,
+        )
+    }
+
     /** Roland checksum over [bytes] (address + payload). */
     fun checksum(bytes: IntArray): Int {
         var sum = 0

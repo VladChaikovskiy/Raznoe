@@ -3,6 +3,7 @@ package com.raznoe.katana.model
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 
@@ -39,6 +40,7 @@ object MusicLibrary {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.ALBUM_ID,
         )
         val cursor = context.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -55,12 +57,14 @@ object MusicLibrary {
             val artistCol = c.getColumnIndex(MediaStore.Audio.Media.ARTIST)
             val durCol = c.getColumnIndex(MediaStore.Audio.Media.DURATION)
             val nameCol = c.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
+            val albumCol = c.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 val title = titleCol.takeIf { it >= 0 }?.let { c.getString(it) }
                 val fileName = nameCol.takeIf { it >= 0 }?.let { c.getString(it) }
                 val artist = artistCol.takeIf { it >= 0 }?.let { c.getString(it) }
                 val duration = durCol.takeIf { it >= 0 }?.let { c.getLong(it) } ?: 0L
+                val albumId = albumCol.takeIf { it >= 0 }?.let { c.getLong(it) } ?: 0L
                 found.add(
                     Track(
                         uri = ContentUris.withAppendedId(
@@ -73,6 +77,11 @@ object MusicLibrary {
                         // file has no artist tag; that is noise on screen.
                         artist = artist?.takeIf { it.isNotBlank() && it != UNKNOWN }.orEmpty(),
                         durationMs = duration,
+                        artUri = if (albumId > 0) {
+                            ContentUris.withAppendedId(ALBUM_ART, albumId).toString()
+                        } else {
+                            ""
+                        },
                         fromLibrary = true,
                     ),
                 )
@@ -82,4 +91,11 @@ object MusicLibrary {
     }
 
     private const val UNKNOWN = "<unknown>"
+
+    /**
+     * Where MediaStore keeps album covers. Not a documented constant, but the
+     * path every Android release has served album art from, and the one thing
+     * that works the same from API 24 through 34.
+     */
+    private val ALBUM_ART: Uri = Uri.parse("content://media/external/audio/albumart")
 }

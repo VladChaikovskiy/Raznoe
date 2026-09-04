@@ -12,8 +12,8 @@ android {
         applicationId = "com.raznoe.katana"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
 
     buildTypes {
@@ -67,6 +67,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+    // Album art in the jam track list: content:// URIs, async loading and a
+    // bounded memory cache, none of which is worth hand-rolling for a list
+    // that can hold a few hundred rows.
+    implementation("io.coil-kt:coil-compose:2.6.0")
 
     testImplementation("junit:junit:4.13.2")
 

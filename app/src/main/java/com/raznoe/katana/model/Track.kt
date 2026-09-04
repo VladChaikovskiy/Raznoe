@@ -16,6 +16,8 @@ data class Track(
     val name: String,
     val artist: String = "",
     val durationMs: Long = 0,
+    /** Album art, as a content:// URI; empty when the file has none. */
+    val artUri: String = "",
     /** true => found in the phone's music library rather than hand-picked. */
     val fromLibrary: Boolean = false,
 )

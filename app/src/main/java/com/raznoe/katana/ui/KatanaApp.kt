@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,20 +39,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.raznoe.katana.DIAG_BLOCKS
 import com.raznoe.katana.DeviceInfo
 import com.raznoe.katana.KatanaViewModel
 import com.raznoe.katana.audio.JamOutput
 import com.raznoe.katana.model.FactoryPresets
 import com.raznoe.katana.model.MusicLibrary
 import com.raznoe.katana.model.Patch
+import com.raznoe.katana.model.Track
 import com.raznoe.katana.model.Tracks
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
@@ -80,7 +86,8 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
                 1 -> TogglesScreen(vm)
                 2 -> PresetsScreen(vm)
                 3 -> JamScreen(vm)
-                else -> LibraryScreen(vm)
+                4 -> LibraryScreen(vm)
+                else -> DiagnosticsScreen(vm)
             }
         }
         BottomNav(screen) { screen = it }
@@ -89,7 +96,7 @@ fun KatanaApp(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Unit) {
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека")
+    val items = listOf("Патч", "Тумблеры", "Пресеты", "Джем", "Библиотека", "Диагностика")
     Row(
         Modifier.fillMaxWidth().background(Nux.Panel)
             .horizontalScroll(rememberScrollState())
@@ -163,7 +170,7 @@ private fun PatchScreen(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Un
             "Gen 3: усилитель, вкл/выкл эффектов и параметры бустера/дилея/ревера/гейта " +
                 "используют реальные адреса Gen 3 (эффекты — с учётом слота FX-BOX). " +
                 "Параметры Mod/FX (тип и настройки) на Gen 3 устроены сложнее и пока в работе. " +
-                "Что уходит в комбик — видно на вкладке «Лог».",
+                "Что уходит в комбик и что он отвечает — на вкладке «Диагностика».",
             color = Nux.TextLo, fontSize = 12.sp,
         )
     }
@@ -391,6 +398,7 @@ private fun PresetsScreen(vm: KatanaViewModel) {
 private fun JamScreen(vm: KatanaViewModel) {
     val jam = vm.jam
     var search by remember { mutableStateOf("") }
+    var showMixer by remember { mutableStateOf(false) }
     // Asking for the persistable grant is what makes a hand-picked file still
     // open after a restart; the stock OpenDocument contract does not.
     val picker = rememberLauncherForActivityResult(PickAudio()) { uris ->
@@ -408,169 +416,421 @@ private fun JamScreen(vm: KatanaViewModel) {
     var routeTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(2000); routeTick++ } }
 
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Header + add button
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("Джем", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Pill("+ файл", selected = true, accent = Nux.Orange) { picker.launch(Unit) }
-        }
+    val shown = Tracks.filter(vm.tracks, search)
 
-        // Now playing: name, seek, transport with Play/Pause/Stop
-        Panel(accent = Nux.Orange) {
-            val name = jam.trackName.ifEmpty { "Ничего не выбрано" }
-            Text(name, color = Nux.TextHi, fontWeight = FontWeight.SemiBold, maxLines = 1, fontSize = 13.sp)
-            val dur = if (jam.durationMs > 0) jam.durationMs else 1
-            Slider(
-                value = jam.positionMs.coerceIn(0, dur).toFloat(),
-                onValueChange = { jam.seekTo(it.toInt()) },
-                valueRange = 0f..dur.toFloat(),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(fmtTime(jam.positionMs), color = Nux.TextLo, fontSize = 11.sp)
-                Text(fmtTime(jam.durationMs), color = Nux.TextLo, fontSize = 11.sp)
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("▶", selected = jam.isPlaying, accent = Nux.Orange) {
-                    if (!jam.isPlaying) jam.togglePlayPause()
-                }
-                Pill("⏸", selected = false, accent = Nux.Orange) {
-                    if (jam.isPlaying) jam.togglePlayPause()
-                }
-                Pill("⏹", selected = false, accent = Nux.Orange) { jam.stop() }
-                Pill("Луп", selected = jam.looping, accent = Nux.Orange) { jam.toggleLoop() }
-                Pill("${jam.speed}x", selected = false, accent = Nux.Orange) { jam.cycleSpeed() }
-            }
-            if (jam.status.isNotEmpty()) {
-                Text(
-                    jam.status,
-                    color = if (jam.waitingForRoute) Nux.Amp else Nux.TextLo,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-
-        // Where the backing track goes
-        Panel(accent = if (jam.output == JamOutput.BLUETOOTH) Nux.Mod else Nux.Stroke) {
-            Text("Куда играет минусовка", color = Nux.TextLo, fontSize = 12.sp)
-            Row(Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                JamOutput.entries.forEach { o ->
-                    Pill(o.label, selected = jam.output == o, accent = Nux.Orange) { jam.chooseOutput(o) }
-                }
-            }
-            key(routeTick) {
-                Text("Сейчас: ${jam.routeLabel}", color = Nux.TextHi, fontSize = 12.sp)
-                // Only the routes that can reach the amp are worth naming; the
-                // phone speaker is the fallback and needs no announcement.
-                val external = jam.routes().filter { it.bluetooth || it.usb }
-                if (external.isEmpty()) {
-                    Text(
-                        "Bluetooth и USB-аудио не подключены — минусовка пойдёт в телефон",
-                        color = Nux.TextLo, fontSize = 11.sp,
-                    )
-                } else {
-                    external.forEach { r ->
-                        Text("• ${r.kind}: ${r.name}", color = Nux.TextLo, fontSize = 11.sp)
-                    }
-                }
-            }
-            Text(
-                "Gen 3 умеет Bluetooth-аудио: подключи комбик в настройках Bluetooth телефона — " +
-                    "минусовка пойдёт через его динамик, а пресеты продолжат идти по USB-кабелю. " +
-                    "Если Bluetooth пропадёт, воспроизведение встанет на паузу и продолжится само.",
-                color = Nux.TextLo, fontSize = 11.sp,
-            )
-        }
-
-        // Volumes (compact)
-        Panel {
-            Text("MP3: ${(jam.volume * 100).toInt()}%", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(value = jam.volume, onValueChange = { jam.changeVolume(it) }, valueRange = 0f..1f)
-            val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
-            Text("Гитара: $gv", color = Nux.TextLo, fontSize = 12.sp)
-            Slider(value = gv.toFloat(), onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
-                valueRange = 0f..100f)
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("Блокировать кнопки телефона", color = Nux.TextLo, fontSize = 12.sp,
-                modifier = Modifier.weight(1f))
-            OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
-        }
-
-        // Access to the phone's music, then search, then the list itself.
-        if (!vm.musicAccess) {
-            Panel(accent = Nux.Amp) {
-                Text(
-                    "Дай доступ к музыке — и все треки с телефона появятся здесь сами.",
-                    color = Nux.TextHi, fontSize = 12.sp,
-                )
-                Pill("Разрешить доступ к музыке", selected = true, accent = Nux.Orange) {
-                    musicPermission.launch(MusicLibrary.permission())
-                }
-            }
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
+    // Fixed search bar on top, fixed player at the bottom, everything else in a
+    // lazy list between them. The previous layout put the panels in a plain
+    // Column, so on a phone screen the search field and the whole track list
+    // were pushed off the bottom with no way to scroll to them — the tab looked
+    // like it had no music at all.
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                label = { Text("поиск по названию / артисту") },
+                label = { Text("поиск") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Pill("⟳", selected = vm.scanningLibrary, accent = Nux.Orange) {
                 vm.scanLibrary(vm.hasMusicPermission())
             }
+            Pill("+", selected = false, accent = Nux.Orange) { picker.launch(Unit) }
+            Pill("🔊", selected = showMixer, accent = Nux.Orange) { showMixer = !showMixer }
         }
 
-        val shown = Tracks.filter(vm.tracks, search)
-        Text(
-            if (vm.libraryStatus.isEmpty()) "Треков: ${shown.size}"
-            else "${vm.libraryStatus} · показано: ${shown.size}",
-            color = Nux.TextLo, fontSize = 11.sp,
-        )
-
-        // LazyColumn, not a scrolling Column: a phone library runs to hundreds
-        // of tracks and composing every row at once makes the tab crawl.
         LazyColumn(
-            Modifier.fillMaxWidth().weight(1f),
+            Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(shown, key = { it.uri }) { t ->
-                val playing = jam.trackUri == t.uri
-                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Column(
-                        Modifier.weight(1f).clickable { vm.playTrack(t) },
-                    ) {
-                        Text(
-                            (if (playing) "▶ " else "") + t.name,
-                            color = if (playing) Nux.Orange else Nux.TextHi,
-                            maxLines = 1, fontSize = 13.sp,
-                        )
-                        val sub = Tracks.subtitle(t)
-                        if (sub.isNotEmpty()) {
-                            Text(sub, color = Nux.TextLo, fontSize = 10.sp, maxLines = 1)
-                        }
-                    }
-                    // Only hand-picked files can be removed; a library track
-                    // would just come back on the next scan.
-                    if (!t.fromLibrary) {
-                        Box(Modifier.padding(start = 8.dp)) {
-                            Pill("✕", selected = false, accent = Nux.Amp) { vm.removeTrack(t) }
+            // Music access first: without it the list is empty and nothing
+            // else on this tab matters.
+            if (!vm.musicAccess) {
+                item {
+                    Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Panel(accent = Nux.Amp) {
+                            Text(
+                                "Дай доступ к музыке — и все треки с телефона появятся здесь сами.",
+                                color = Nux.TextHi, fontSize = 12.sp,
+                            )
+                            Pill("Разрешить доступ к музыке", selected = true, accent = Nux.Orange) {
+                                musicPermission.launch(MusicLibrary.permission())
+                            }
                         }
                     }
                 }
             }
+
+            if (showMixer) {
+                item {
+                    Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        MixerPanel(vm, routeTick)
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    if (vm.libraryStatus.isEmpty()) "Треков: ${shown.size}"
+                    else "${vm.libraryStatus} · показано: ${shown.size}",
+                    color = Nux.TextLo, fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+
+            if (shown.isEmpty()) {
+                item {
+                    Text(
+                        if (vm.musicAccess) {
+                            "Ничего не найдено. Нажми ⟳ или добавь файл кнопкой «+»."
+                        } else {
+                            "Список пуст, пока нет доступа к музыке."
+                        },
+                        color = Nux.TextLo, fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+
+            items(shown, key = { it.uri }) { t ->
+                TrackRow(
+                    track = t,
+                    playing = jam.trackUri == t.uri,
+                    onPlay = { vm.playTrack(t) },
+                    onRemove = if (t.fromLibrary) null else ({ vm.removeTrack(t) }),
+                )
+            }
+        }
+
+        MiniPlayer(vm)
+    }
+}
+
+/** One row of the track list: cover, title, artist and length. */
+@Composable
+private fun TrackRow(
+    track: Track,
+    playing: Boolean,
+    onPlay: () -> Unit,
+    onRemove: (() -> Unit)?,
+) {
+    Column {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onPlay)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Cover(track.artUri, 52.dp)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    track.name,
+                    color = if (playing) Nux.Orange else Nux.TextHi,
+                    fontSize = 16.sp,
+                    fontWeight = if (playing) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                )
+                Text(
+                    Tracks.subtitle(track).ifEmpty { "Неизвестно" },
+                    color = Nux.TextLo, fontSize = 13.sp, maxLines = 1,
+                )
+            }
+            // Only hand-picked files can be removed; a library track would just
+            // come back on the next scan.
+            onRemove?.let { remove ->
+                Pill("✕", selected = false, accent = Nux.Amp, onClick = remove)
+            }
+        }
+        Box(Modifier.fillMaxWidth().padding(start = 76.dp).height(1.dp).background(Nux.Stroke))
+    }
+}
+
+/** Album art, with a music-note placeholder when the file has none. */
+@Composable
+private fun Cover(artUri: String?, size: Dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(8.dp)).background(Nux.PanelHi),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (artUri.isNullOrEmpty()) {
+            Text("♪", color = Nux.TextLo, fontSize = (size.value / 2.4f).sp)
+        } else {
+            AsyncImage(
+                model = artUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
+ * The player bar pinned to the bottom of the Jam tab: cover, what is playing,
+ * and prev/play/next. Tapping it opens the seek bar, loop and speed, so the
+ * bar stays small without losing anything.
+ */
+@Composable
+private fun MiniPlayer(vm: KatanaViewModel) {
+    val jam = vm.jam
+    val track = vm.playingTrack
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().background(Nux.Panel)) {
+        // Progress as a hairline, so the bar costs almost no height.
+        val fraction = if (jam.durationMs > 0) {
+            (jam.positionMs.toFloat() / jam.durationMs).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        Box(Modifier.fillMaxWidth().height(2.dp).background(Nux.Stroke)) {
+            if (fraction > 0f) {
+                Box(Modifier.fillMaxWidth(fraction).height(2.dp).background(Nux.Orange))
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Cover(track?.artUri, 44.dp)
+            Column(
+                Modifier.weight(1f).clickable { expanded = !expanded },
+            ) {
+                Text(
+                    track?.name ?: jam.trackName.ifEmpty { "Ничего не выбрано" },
+                    color = Nux.TextHi, fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp, maxLines = 1,
+                )
+                Text(
+                    if (jam.waitingForRoute || jam.status.isNotEmpty()) jam.status
+                    else Tracks.subtitle(track ?: Track("", "")).ifEmpty { "—" },
+                    color = if (jam.waitingForRoute) Nux.Amp else Nux.TextLo,
+                    fontSize = 11.sp, maxLines = 1,
+                )
+            }
+            TransportButton("⏮") { vm.playPrev() }
+            TransportButton(if (jam.isPlaying) "⏸" else "▶") { jam.togglePlayPause() }
+            TransportButton("⏭") { vm.playNext() }
+        }
+        if (expanded) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, bottom = 8.dp)) {
+                val dur = if (jam.durationMs > 0) jam.durationMs else 1
+                Slider(
+                    value = jam.positionMs.coerceIn(0, dur).toFloat(),
+                    onValueChange = { jam.seekTo(it.toInt()) },
+                    valueRange = 0f..dur.toFloat(),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(fmtTime(jam.positionMs), color = Nux.TextLo, fontSize = 11.sp)
+                    Text(fmtTime(jam.durationMs), color = Nux.TextLo, fontSize = 11.sp)
+                }
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Pill("⏹ Стоп", selected = false, accent = Nux.Orange) { jam.stop() }
+                    Pill("Луп", selected = jam.looping, accent = Nux.Orange) { jam.toggleLoop() }
+                    Pill("${jam.speed}x", selected = false, accent = Nux.Orange) { jam.cycleSpeed() }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransportButton(glyph: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, color = Nux.TextHi, fontSize = 20.sp)
+    }
+}
+
+/** Volumes and where the sound goes — the two things set once per session. */
+@Composable
+private fun MixerPanel(vm: KatanaViewModel, routeTick: Int) {
+    val jam = vm.jam
+    Panel(accent = if (jam.output == JamOutput.BLUETOOTH) Nux.Mod else Nux.Stroke) {
+        Text("Куда играет минусовка", color = Nux.TextLo, fontSize = 12.sp)
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            JamOutput.entries.forEach { o ->
+                Pill(o.label, selected = jam.output == o, accent = Nux.Orange) {
+                    jam.chooseOutput(o)
+                }
+            }
+        }
+        key(routeTick) {
+            Text("Сейчас: ${jam.routeLabel}", color = Nux.TextHi, fontSize = 12.sp)
+            val external = jam.routes().filter { it.bluetooth || it.usb }
+            if (external.isEmpty()) {
+                Text(
+                    "Bluetooth и USB-аудио не подключены — играет в телефон. " +
+                        "Подключи комбик в настройках Bluetooth телефона.",
+                    color = Nux.TextLo, fontSize = 11.sp,
+                )
+            } else {
+                external.forEach { r ->
+                    Text("• ${r.kind}: ${r.name}", color = Nux.TextLo, fontSize = 11.sp)
+                }
+            }
+        }
+
+        Text("Громкость минусовки: ${(jam.volume * 100).toInt()}%",
+            color = Nux.TextLo, fontSize = 12.sp)
+        Slider(value = jam.volume, onValueChange = { jam.changeVolume(it) }, valueRange = 0f..1f)
+
+        val gv = vm.paramValues[KatanaParams.VOLUME.id] ?: 0
+        Text("Громкость комбика (гитара): $gv", color = Nux.TextLo, fontSize = 12.sp)
+        Slider(
+            value = gv.toFloat(),
+            onValueChange = { vm.setParam(KatanaParams.VOLUME, it.toInt()) },
+            valueRange = 0f..100f,
+        )
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Блокировать кнопки телефона", color = Nux.TextLo, fontSize = 12.sp,
+                modifier = Modifier.weight(1f))
+            OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
+        }
+    }
+}
+
+/**
+ * Reads the amp back so a wrong address can be found instead of guessed at.
+ *
+ * The presets can be perfect and still land wrong, because the Gen 3 address
+ * map is only partly confirmed — a value written to the wrong byte changes
+ * something nobody asked for. There is exactly one way to tell those two cases
+ * apart without the amp in front of me: read a block, turn a knob on the amp
+ * itself, read again, and see which byte moved. That byte's address is the
+ * truth, and it goes straight into KatanaParams.
+ */
+@Composable
+private fun DiagnosticsScreen(vm: KatanaViewModel) {
+    val clipboard = LocalClipboardManager.current
+    var typeReport by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        DeviceTitle()
+        Text("Диагностика адресов", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        val link = if (!vm.connected) {
+            "Не подключено — подключи комбик на вкладке «Патч»"
+        } else {
+            val data = if (vm.gotData) "✓ данные идут" else "⚠ данных нет"
+            "● ${vm.connectedLabel} · TX ${vm.txCount} · RX ${vm.rxCount} · $data"
+        }
+        Text(link, color = if (vm.gotData) Nux.Gate else Nux.Amp, fontSize = 12.sp)
+
+        Panel(accent = Nux.Gate) {
+            Text("Найти реальный адрес ручки", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "1) «Прочитать всё» → 2) «Снимок» → 3) покрути ОДНУ ручку на самом комбике " +
+                    "→ 4) «Прочитать всё» → 5) «Сравнить». Изменившийся байт и есть адрес этой ручки.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Прочитать всё", selected = true, accent = Nux.Gate) {
+                    vm.readCurrentState()
+                }
+                Pill("Снимок", selected = false, accent = Nux.Gate) { vm.snapshotBlocks() }
+                Pill("Сравнить", selected = false, accent = Nux.Gate) { vm.compareBlocks() }
+            }
+            if (vm.diffReport.isNotEmpty()) {
+                Text(vm.diffReport, color = Nux.TextHi, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+        }
+
+        Panel {
+            Text("Прочитать отдельный блок", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DIAG_BLOCKS.forEach { b ->
+                    Pill(b.label, selected = false, accent = Nux.Orange) { vm.readNamedBlock(b) }
+                }
+            }
+        }
+
+        // Which index is which amp character is the open question behind the
+        // "clean sounds wrong" reports: our list is the MkII order, and Gen 3
+        // may not agree. Sending one index at a time settles it by ear.
+        Panel(accent = Nux.Amp) {
+            Text("Проверка типов усилителя", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Жми по очереди и слушай, что реально включается. Скажи мне, какой номер " +
+                    "даёт Clean, какой Crunch и т.д. — впишу правильный порядок.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (i in 0..7) {
+                    val label = KatanaParams.AMP_TYPES.getOrNull(i)?.let { "$i·$it" } ?: "$i·?"
+                    Pill(label, selected = false, accent = Nux.Amp) {
+                        typeReport = vm.sendAmpTypeRaw(i)
+                    }
+                }
+            }
+            if (typeReport.isNotEmpty()) {
+                Text(typeReport, color = Nux.TextLo, fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+        }
+
+        Panel {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Что ответил комбик (${vm.blocks.size})", color = Nux.TextHi,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Pill("Копировать", selected = true, accent = Nux.Orange) {
+                    clipboard.setText(AnnotatedString(vm.diagnosticsText()))
+                }
+            }
+            if (vm.blocks.isEmpty()) {
+                Text("Пусто. Подключи комбик и нажми «Прочитать всё».",
+                    color = Nux.TextLo, fontSize = 12.sp)
+            }
+            vm.blocks.entries.sortedBy { it.key }.forEach { (addr, bytes) ->
+                Text(addr, color = Nux.Orange, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                Text(
+                    bytes.joinToString(" ") { "%02X".format(it) },
+                    color = Nux.TextHi, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    bytes.joinToString(" ") { "%3d".format(it) },
+                    color = Nux.TextLo, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+
+        Panel {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Журнал действий", color = Nux.TextHi, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                Pill("Копировать", selected = false, accent = Nux.Orange) {
+                    clipboard.setText(AnnotatedString(vm.actionLogText()))
+                }
+            }
+            Text(
+                "Здесь видно, что уходит на комбик и по какому адресу — включая результат " +
+                    "загрузки пресета.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
         }
     }
 }

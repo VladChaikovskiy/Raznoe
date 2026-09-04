@@ -79,6 +79,20 @@ class TrackListTest {
         val t = Track(uri = "content://x", name = "Old")
         assertEquals("", t.artist)
         assertEquals(0L, t.durationMs)
+        assertEquals("", t.artUri)
         assertEquals(false, t.fromLibrary)
+    }
+
+    /**
+     * A duplicate URI is a hard crash in the LazyColumn that renders this list
+     * (keys must be unique), and an older saved track file can hold one twice.
+     */
+    @Test fun merge_neverReturnsTheSameUriTwice() {
+        val dup = Track(uri = "content://dup", name = "Dup")
+        val merged = Tracks.merge(
+            library = listOf(lib("A"), lib("A", uri = "A")),
+            picked = listOf(dup, dup.copy(name = "Dup again")),
+        )
+        assertEquals(merged.size, merged.map { it.uri }.toSet().size)
     }
 }

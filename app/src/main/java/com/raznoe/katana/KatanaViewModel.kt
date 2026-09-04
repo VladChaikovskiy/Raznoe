@@ -39,6 +39,23 @@ const val ROLAND_VENDOR_ID = 0x0582
 
 data class DeviceInfo(val device: UsbDevice, val label: String)
 
+/** A block worth reading back from the amp on the diagnostics screen. */
+data class DiagBlock(val label: String, val address: IntArray, val size: Int) {
+    override fun equals(other: Any?) = other is DiagBlock && other.label == label
+    override fun hashCode() = label.hashCode()
+}
+
+/**
+ * The Gen 3 blocks that decide the tone. Reading these back is how a wrong
+ * address gets found: turn a knob on the amp, read again, see which byte moved.
+ */
+val DIAG_BLOCKS = listOf(
+    DiagBlock("усилитель", intArrayOf(0x20, 0x00, 0x06, 0x00), 16),
+    DiagBlock("вкл/выкл эффектов", intArrayOf(0x20, 0x00, 0x08, 0x00), 16),
+    DiagBlock("слоты FX-BOX", intArrayOf(0x20, 0x00, 0x04, 0x00), 8),
+    DiagBlock("шумодав", intArrayOf(0x20, 0x00, 0x58, 0x00), 4),
+)
+
 class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     private val app = app
@@ -412,6 +429,82 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Diagnostics: raw blocks the amp reported ------------------------
+    /**
+     * Every block of bytes the amp has reported, keyed by the address it came
+     * from. This is the raw truth about the Gen 3 address map, which is still
+     * partly guessed: the presets can be perfect and still land wrong if a
+     * value goes to the wrong address, and reading the amp back is the only way
+     * to tell the two apart.
+     */
+    val blocks = mutableStateMapOf<String, List<Int>>()
+    private var blockSnapshot: Map<String, List<Int>> = emptyMap()
+    var diffReport by mutableStateOf("")
+        private set
+
+    /** Remember the current bytes, so a physical knob turn can be spotted. */
+    fun snapshotBlocks() {
+        blockSnapshot = blocks.mapValues { it.value.toList() }
+        diffReport = "Снимок сделан (${blockSnapshot.size} блоков). Теперь покрути " +
+            "ручку на самом комбике, нажми «Прочитать» и потом «Сравнить»."
+    }
+
+    /** Report every byte that changed since [snapshotBlocks], with its address. */
+    fun compareBlocks() {
+        if (blockSnapshot.isEmpty()) {
+            diffReport = "Сначала нажми «Снимок»."
+            return
+        }
+        val report = StringBuilder()
+        for ((key, after) in blocks.entries.sortedBy { it.key }) {
+            val before = blockSnapshot[key] ?: continue
+            for (i in after.indices) {
+                val old = before.getOrNull(i) ?: continue
+                if (old == after[i]) continue
+                val base = runCatching { KatanaSysEx.fromHex(key).map { it.toInt() and 0xFF }.toIntArray() }
+                    .getOrNull() ?: continue
+                if (base.size != 4) continue
+                val full = addrHex(KatanaSysEx.addrPlus(base, i))
+                report.append("$full : $old → ${after[i]}   (блок $key, байт +$i)\n")
+            }
+        }
+        diffReport = if (report.isEmpty()) {
+            "Изменений нет. Покрути ручку на комбике и нажми «Прочитать», потом «Сравнить»."
+        } else {
+            "Изменились байты:\n$report"
+        }
+    }
+
+    fun readNamedBlock(block: DiagBlock) {
+        val ctl = controller
+        if (ctl == null) { diffReport = "Нет связи с комбиком"; return }
+        ctl.readBlock(block.address, block.size)
+        diffReport = "Запрошен ${block.label} (${addrHex(block.address)}, ${block.size} байт)"
+    }
+
+    /**
+     * Write an amp-type value directly, bypassing the preset machinery, so the
+     * mapping between our list and what the amp actually does can be heard one
+     * index at a time.
+     */
+    fun sendAmpTypeRaw(index: Int): String {
+        val ctl = controller ?: return "Нет связи"
+        ctl.setParam(KatanaParams.AMP_TYPE, index)
+        return "Отправлен тип $index → ${addrHex(ctl.resolveAddress(KatanaParams.AMP_TYPE))}"
+    }
+
+    fun diagnosticsText(): String = buildString {
+        append("$APP_NAME — диагностика адресов\n")
+        append("Профиль: ${KatanaSysEx.generation}  заголовок ${KatanaSysEx.headerHex()}\n")
+        append("ID: ${identityInfo.ifEmpty { "—" }}  TX=${txAtomic.get()} RX=${rxAtomic.get()}\n")
+        append("Блоков получено: ${blocks.size}\n----\n")
+        for ((key, bytes) in blocks.entries.sortedBy { it.key }) {
+            append("$key : ${bytes.joinToString(" ") { "%02X".format(it) }}\n")
+            append("          дес: ${bytes.joinToString(" ")}\n")
+        }
+        if (diffReport.isNotEmpty()) append("----\n$diffReport\n")
+    }
+
     /**
      * Fold an inbound DT1 (which may be a whole block from an RQ1 read or a
      * single-parameter knob echo) back onto our parameter values. For each
@@ -421,6 +514,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val addr = incoming.address
         val data = incoming.data
         if (data.isEmpty()) return
+        blocks[addrHex(addr)] = data.map { it and 0x7F }
         for (p in KatanaParams.ALL) {
             // Match against both the MkII and Gen 3 address of the parameter.
             for (pa in listOfNotNull(p.address, p.addrGen3)) {
@@ -581,6 +675,21 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun playTrack(track: Track) = jam.play(track.uri, track.name)
+
+    /** The track the player currently holds, as an entry of [tracks]. */
+    val playingTrack: Track?
+        get() = jam.trackUri?.let { uri -> tracks.firstOrNull { it.uri == uri } }
+
+    fun playNext() = step(+1)
+    fun playPrev() = step(-1)
+
+    /** Move [delta] tracks through the visible list, wrapping at the ends. */
+    private fun step(delta: Int) {
+        if (tracks.isEmpty()) return
+        val current = jam.trackUri?.let { uri -> tracks.indexOfFirst { it.uri == uri } } ?: -1
+        val next = if (current < 0) 0 else (current + delta).mod(tracks.size)
+        playTrack(tracks[next])
+    }
 
     private fun queryDisplayName(uri: Uri): String? =
         runCatching {

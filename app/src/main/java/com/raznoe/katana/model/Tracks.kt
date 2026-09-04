@@ -16,8 +16,13 @@ object Tracks {
     fun merge(library: List<Track>, picked: List<Track>): List<Track> {
         val libraryUris = library.mapTo(HashSet()) { it.uri }
         val byName = compareBy<Track> { it.name.lowercase() }
-        return picked.filterNot { it.uri in libraryUris }.sortedWith(byName) +
-            library.sortedWith(byName)
+        // distinctBy is not paranoia: the list is fed to a LazyColumn keyed by
+        // URI, and a duplicate key is a hard crash. An older saved track file
+        // can hold the same URI twice.
+        return (
+            picked.filterNot { it.uri in libraryUris }.sortedWith(byName) +
+                library.sortedWith(byName)
+            ).distinctBy { it.uri }
     }
 
     /**

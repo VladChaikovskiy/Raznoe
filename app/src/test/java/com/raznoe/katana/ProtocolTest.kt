@@ -4,6 +4,7 @@ import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.KatanaSysEx
 import com.raznoe.katana.usb.UsbMidiPacketizer
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -112,5 +113,29 @@ class ProtocolTest {
     @Test fun paramMap_isConsistent() {
         assertTrue(KatanaParams.ALL.all { it.address.size == 4 })
         assertEquals(KatanaParams.ALL.size, KatanaParams.ALL.map { it.id }.toSet().size)
+    }
+
+    /**
+     * Roland addresses are 7 bits per byte, so the byte after 0x7F is 0x00 in
+     * the next byte up. The diagnostics screen reports the address of a byte
+     * that changed inside a block, and it has to survive that carry.
+     */
+    @Test fun addrPlus_carriesAcrossSevenBitBytes() {
+        assertArrayEquals(
+            intArrayOf(0x20, 0x00, 0x06, 0x05),
+            KatanaSysEx.addrPlus(intArrayOf(0x20, 0x00, 0x06, 0x00), 5),
+        )
+        assertArrayEquals(
+            intArrayOf(0x20, 0x00, 0x07, 0x00),
+            KatanaSysEx.addrPlus(intArrayOf(0x20, 0x00, 0x06, 0x7F), 1),
+        )
+        assertArrayEquals(
+            intArrayOf(0x20, 0x01, 0x00, 0x00),
+            KatanaSysEx.addrPlus(intArrayOf(0x20, 0x00, 0x7F, 0x7F), 1),
+        )
+        assertArrayEquals(
+            intArrayOf(0x20, 0x00, 0x06, 0x00),
+            KatanaSysEx.addrPlus(intArrayOf(0x20, 0x00, 0x06, 0x00), 0),
+        )
     }
 }
