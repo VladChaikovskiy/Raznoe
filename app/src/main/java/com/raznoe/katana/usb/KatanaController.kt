@@ -196,6 +196,15 @@ class KatanaController(private val connection: UsbMidiConnection) {
             val data = encode(param, value)
             for (addr in addressesFor(param)) frames.add(KatanaSysEx.buildSet(addr, data))
         }
+        // The block on/off switches need their documented CC as well, for the
+        // same reason a single knob does: the SysEx toggle only bites when the
+        // matching range of that DSP knob is the active one. Without this a
+        // preset could set every effect parameter and still fail to switch the
+        // block on.
+        val ccs = entries.mapNotNull { (param, value) ->
+            if (param.kind != ParamKind.TOGGLE) return@mapNotNull null
+            KatanaParams.TOGGLE_CC[param.id]?.let { cc -> cc to if (value != 0) 127 else 0 }
+        }.distinct()
         if (sender.isShutdown) { onDone?.invoke(0, frames.size); return }
         runCatching {
             sender.submit {
@@ -204,6 +213,15 @@ class KatanaController(private val connection: UsbMidiConnection) {
                     if (sender.isShutdown || presetEpoch.get() != epoch) break
                     sendNow(f)
                     sent++
+                    sleep(PRESET_SETTLE_MS)
+                }
+                for ((cc, value) in ccs) {
+                    if (sender.isShutdown || presetEpoch.get() != epoch) break
+                    connection.sendPackets(UsbMidiPacketizer.encodeControlChange(0, cc, value))
+                    onTraffic?.invoke(
+                        "TX",
+                        byteArrayOf(0xB0.toByte(), cc.toByte(), value.toByte()),
+                    )
                     sleep(PRESET_SETTLE_MS)
                 }
                 onDone?.invoke(sent, frames.size)

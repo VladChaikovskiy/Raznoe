@@ -967,15 +967,15 @@ private fun DiagnosticsScreen(vm: KatanaViewModel) {
         Panel(accent = Nux.Amp) {
             Text("Проверка типов усилителя", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             Text(
-                "Жми по очереди и слушай, что реально включается. Скажи мне, какой номер " +
-                    "даёт Clean, какой Crunch и т.д. — впишу правильный порядок.",
+                "Коды подтверждены спецификацией: 0 Acoustic, 1 Clean, 2 Crunch, 3 Lead, " +
+                    "4 Brown. Жми и слушай — если какой-то номер даёт не то, что подписано, " +
+                    "скажи мне, какой именно.",
                 color = Nux.TextLo, fontSize = 11.sp,
             )
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (i in 0..7) {
-                    val label = KatanaParams.AMP_TYPES.getOrNull(i)?.let { "$i·$it" } ?: "$i·?"
-                    Pill(label, selected = false, accent = Nux.Amp) {
+                KatanaParams.AMP_TYPES.forEachIndexed { i, name ->
+                    Pill("$i·$name", selected = false, accent = Nux.Amp) {
                         typeReport = vm.sendAmpTypeRaw(i)
                     }
                 }
