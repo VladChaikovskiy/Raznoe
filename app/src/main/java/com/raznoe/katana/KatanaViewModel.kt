@@ -132,6 +132,31 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     var activePreset by mutableStateOf("")
         private set
+
+    // --- What a preset is allowed to write -------------------------------
+    // The preset values are provably right; whether they LAND right depends on
+    // the Gen 3 address map, which is only partly confirmed. Splitting the
+    // write by section turns "the presets ruin the tone" into a question that
+    // can be answered by ear in one tap: switch the amp block off, load a
+    // preset, and if the tone is sane then the fault is in the amp addresses,
+    // not in the preset.
+    var writeAmpBlock by mutableStateOf(true)
+        private set
+    var writeEffects by mutableStateOf(true)
+        private set
+    var writeGate by mutableStateOf(true)
+        private set
+
+    fun setWriteAmpBlock(on: Boolean) { writeAmpBlock = on }
+    fun setWriteEffects(on: Boolean) { writeEffects = on }
+    fun setWriteGate(on: Boolean) { writeGate = on }
+
+    /** Which sections of a patch may be sent, per the switches above. */
+    private fun allowedForPreset(param: KatanaParam): Boolean = when (param.category) {
+        KatanaParams.AMP_SECTION -> writeAmpBlock
+        KatanaParams.NS_SECTION -> writeGate
+        else -> writeEffects
+    }
     /**
      * true => the Activity swallows hardware volume/media key events. Guards
      * against phantom key presses induced by ground-loop noise when an analog
@@ -397,6 +422,18 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         controller?.readAll()
     }
 
+    /** Current dialect, for the diagnostics screen. */
+    val profileLabel: String
+        get() = "${KatanaSysEx.generation}  ${KatanaSysEx.headerHex()}"
+
+    /** Pick the dialect by hand when auto-detection did not fire. */
+    fun forceProfile(gen: KatanaSysEx.Gen) {
+        KatanaSysEx.forceGeneration(gen)
+        appendLog("— профиль вручную: $gen ${KatanaSysEx.headerHex()} —")
+        logAction("", "Профиль вручную: $gen (${KatanaSysEx.headerHex()})")
+        controller?.readAll()
+    }
+
     /** Experimental new-gen (Gen 3 / Katana:GO dialect) amp command from the console. */
     fun sendNewGenAmp(knob: Int, value: Int): String {
         val ctl = controller ?: return "Не подключено"
@@ -552,12 +589,16 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
      * always sent — a patch never inherits anything from the previous tone.
      */
     fun applyPatch(patch: Patch) {
-        val entries = FactoryPresets.loadOrder(patch.values)
+        val entries = FactoryPresets.loadOrder(patch.values).filter { allowedForPreset(it.first) }
+        if (entries.isEmpty()) {
+            presetStatus = "Нечего отправлять: все разделы выключены"
+            return
+        }
         // Reflect it locally first so the UI is right even with no cable.
         entries.forEach { (p, v) -> paramValues[p.id] = v }
         activePreset = patch.name
         val ctl = controller
-        val missing = KatanaParams.ALL.size - entries.size
+        val skipped = KatanaParams.ALL.size - entries.size
         if (ctl == null) {
             presetStatus = "«${patch.name}»: нет связи — значения только в приложении"
             logAction("", "Пресет '${patch.name}': нет связи (${entries.size} параметров локально)")
@@ -575,7 +616,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                     "«${patch.name}» прерван на $sent из $total — загрузи ещё раз"
                 }
                 logAction("", "Пресет '${patch.name}': отправлено $sent из $total сообщений" +
-                    if (missing > 0) " (нет значений для $missing параметров)" else "")
+                    if (skipped > 0) " (пропущено параметров: $skipped)" else "")
             }
         }
     }

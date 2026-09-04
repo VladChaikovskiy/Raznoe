@@ -254,6 +254,7 @@ object KatanaParams {
     /** Which categories are effect blocks that have an on/off toggle first. */
     val EFFECT_SECTIONS = listOf(BOOST, MOD, FX, DLY, REV, NS)
     val AMP_SECTION = AMP
+    val NS_SECTION = NS
 
     // ---- Channel / preset select (00 01 00 00) --------------------------
     val CURRENT_PRESET_ADDR = a(0x00, 0x01, 0x00, 0x00)

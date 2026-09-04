@@ -55,6 +55,28 @@ object KatanaSysEx {
         prefixTail = intArrayOf(0x00, 0x00, 0x00, 0x00, 0x33); generation = Gen.MKII
     }
 
+    /**
+     * Select a dialect by hand.
+     *
+     * Auto-detection reads the Identity Reply, and when that does not arrive —
+     * or arrives in a shape we do not recognise — the profile stays at the MkII
+     * default. On a Gen 3 amp that means every write goes to a MkII address,
+     * which on Gen 3 is some other parameter entirely: presets stop differing
+     * from each other and the tone turns into something nobody asked for. This
+     * is the escape hatch for that, and the Диагностика tab shows which profile
+     * is actually in use. A later Identity Reply still wins — it is better data.
+     */
+    fun forceGeneration(gen: Gen) {
+        prefixTail = when (gen) {
+            Gen.MKII -> intArrayOf(0x00, 0x00, 0x00, 0x00, 0x33)
+            // Device id 0x10 is what recent BOSS gear answers with; the rest of
+            // the prefix is the model id decoded from the Katana Librarian.
+            Gen.GEN3 -> intArrayOf(0x10, 0x01, 0x05, 0x07)
+            Gen.GO -> intArrayOf(0x10, 0x01, 0x05, 0x0D)
+        }
+        generation = gen
+    }
+
     /** Full header: F0 41 <device id .. model id>. */
     fun header(): IntArray = intArrayOf(0xF0, ROLAND_ID) + prefixTail
 

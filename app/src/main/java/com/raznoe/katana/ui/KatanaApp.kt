@@ -61,6 +61,7 @@ import com.raznoe.katana.model.Track
 import com.raznoe.katana.model.Tracks
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
+import com.raznoe.katana.protocol.KatanaSysEx
 import com.raznoe.katana.protocol.ParamKind
 import kotlinx.coroutines.delay
 
@@ -359,6 +360,37 @@ private fun PresetsScreen(vm: KatanaViewModel) {
                 "ничего не остаётся, и на каждом включён шумодав.",
             color = Nux.TextLo, fontSize = 12.sp,
         )
+        // Splitting the write by section is how "the presets ruin the tone"
+        // becomes answerable by ear: switch the amp block off, load a preset,
+        // and if the tone is sane then the fault is the amp addresses, not the
+        // preset values.
+        Panel(accent = Nux.Amp) {
+            Text("Что пресет меняет в комбике", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Если на clean звук уходит в бочку — выключи «Усилитель». Пресет тогда " +
+                    "не трогает тип усилителя и EQ, а ставит только эффекты. Станет нормально " +
+                    "— значит адреса блока усилителя у Gen 3 не те, и это надо править в коде.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Усилитель (тип, gain, EQ, Level)", color = Nux.TextHi, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f))
+                OnOffPills(on = vm.writeAmpBlock, accent = Nux.Amp) { vm.setWriteAmpBlock(it) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Эффекты (бустер, дилей, ревер, Mod/FX)", color = Nux.TextHi, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f))
+                OnOffPills(on = vm.writeEffects, accent = Nux.Boost) { vm.setWriteEffects(it) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Шумодав", color = Nux.TextHi, fontSize = 13.sp,
+                    modifier = Modifier.weight(1f))
+                OnOffPills(on = vm.writeGate, accent = Nux.Gate) { vm.setWriteGate(it) }
+            }
+        }
         if (vm.presetStatus.isNotEmpty()) {
             Text(
                 vm.presetStatus,
@@ -734,6 +766,33 @@ private fun DiagnosticsScreen(vm: KatanaViewModel) {
             "● ${vm.connectedLabel} · TX ${vm.txCount} · RX ${vm.rxCount} · $data"
         }
         Text(link, color = if (vm.gotData) Nux.Gate else Nux.Amp, fontSize = 12.sp)
+
+        // If this says MKII on a Gen 3 amp, every write goes to a MkII address
+        // — which on Gen 3 is some other parameter. That single line explains
+        // "presets do nothing" and "the tone is wrong" at once.
+        Panel(accent = Nux.Orange) {
+            Text("Профиль (диалект команд)", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(vm.profileLabel, color = Nux.Orange, fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace)
+            Text(
+                "Должно быть GEN3. Если стоит MKII — комбик не ответил на Identity, и все " +
+                    "команды уходят по адресам MkII, то есть в чужие параметры. Поставь Gen 3 " +
+                    "вручную и попробуй пресет снова.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Gen 3", selected = false, accent = Nux.Orange) {
+                    vm.forceProfile(KatanaSysEx.Gen.GEN3)
+                }
+                Pill("MkII", selected = false, accent = Nux.Orange) {
+                    vm.forceProfile(KatanaSysEx.Gen.MKII)
+                }
+                Pill("Katana:GO", selected = false, accent = Nux.Orange) {
+                    vm.forceProfile(KatanaSysEx.Gen.GO)
+                }
+            }
+        }
 
         Panel(accent = Nux.Gate) {
             Text("Найти реальный адрес ручки", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
