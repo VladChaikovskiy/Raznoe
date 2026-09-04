@@ -346,8 +346,16 @@ private fun TogglesScreen(vm: KatanaViewModel) {
 
 private fun blockColorFor(category: String): Color = CHAIN.firstOrNull { it.key == category }?.color ?: Nux.Orange
 
+/** Short block name ("GATE", "DLY"), so a pill does not have to hold "Noise Suppressor". */
+private fun blockShortFor(category: String): String =
+    CHAIN.firstOrNull { it.key == category }?.short ?: category
+
 @Composable
 private fun PresetsScreen(vm: KatanaViewModel) {
+    // Which preset has its tuner open. Loading a preset opens its tuner, so
+    // the knobs that fix the tone are right there instead of on another tab.
+    var tuning by remember { mutableStateOf("") }
+    var showScope by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -356,41 +364,10 @@ private fun PresetsScreen(vm: KatanaViewModel) {
         Text("Пресеты", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text(
             "★ — оригинальные демо-патчи BOSS/JuCaNeRy, остальные — мои версии. " +
-                "Каждый пресет задаёт ВСЕ параметры сразу, поэтому от предыдущего тона " +
-                "ничего не остаётся, и на каждом включён шумодав.",
+                "Жми «Загрузить», а если звук не тот — открой «▾ Подстроить» под пресетом " +
+                "и правь ручками прямо здесь: слышно сразу.",
             color = Nux.TextLo, fontSize = 12.sp,
         )
-        // Splitting the write by section is how "the presets ruin the tone"
-        // becomes answerable by ear: switch the amp block off, load a preset,
-        // and if the tone is sane then the fault is the amp addresses, not the
-        // preset values.
-        Panel(accent = Nux.Amp) {
-            Text("Что пресет меняет в комбике", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Если на clean звук уходит в бочку — выключи «Усилитель». Пресет тогда " +
-                    "не трогает тип усилителя и EQ, а ставит только эффекты. Станет нормально " +
-                    "— значит адреса блока усилителя у Gen 3 не те, и это надо править в коде.",
-                color = Nux.TextLo, fontSize = 11.sp,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Усилитель (тип, gain, EQ, Level)", color = Nux.TextHi, fontSize = 13.sp,
-                    modifier = Modifier.weight(1f))
-                OnOffPills(on = vm.writeAmpBlock, accent = Nux.Amp) { vm.setWriteAmpBlock(it) }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Эффекты (бустер, дилей, ревер, Mod/FX)", color = Nux.TextHi, fontSize = 13.sp,
-                    modifier = Modifier.weight(1f))
-                OnOffPills(on = vm.writeEffects, accent = Nux.Boost) { vm.setWriteEffects(it) }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Шумодав", color = Nux.TextHi, fontSize = 13.sp,
-                    modifier = Modifier.weight(1f))
-                OnOffPills(on = vm.writeGate, accent = Nux.Gate) { vm.setWriteGate(it) }
-            }
-        }
         if (vm.presetStatus.isNotEmpty()) {
             Text(
                 vm.presetStatus,
@@ -419,12 +396,150 @@ private fun PresetsScreen(vm: KatanaViewModel) {
                     }
                     Pill(label, selected = active || loading, accent = Nux.Orange) {
                         vm.applyPatch(p)
+                        tuning = p.name
                     }
+                }
+                Pill(
+                    if (tuning == p.name) "▴ Свернуть" else "▾ Подстроить",
+                    selected = tuning == p.name,
+                    accent = Nux.Amp,
+                ) {
+                    tuning = if (tuning == p.name) "" else p.name
+                }
+                if (tuning == p.name) PresetTuner(vm, p)
+            }
+        }
+
+        // The per-section switches are a diagnostic, not a control anybody
+        // needs day to day, so they sit at the very bottom out of the way.
+        Panel(accent = Nux.Stroke) {
+            Pill(
+                if (showScope) "▴ Скрыть диагностику" else "▾ Диагностика: что пресет меняет",
+                selected = showScope,
+                accent = Nux.Stroke,
+            ) {
+                showScope = !showScope
+            }
+            if (showScope) {
+                Text(
+                    "Если тон всё равно не тот — выключи «Усилитель»: пресет перестанет " +
+                        "трогать тип усилителя и EQ и поставит только эффекты. Станет нормально " +
+                        "— значит адреса блока усилителя у Gen 3 всё ещё не те, скажи мне.",
+                    color = Nux.TextLo, fontSize = 11.sp,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Усилитель (тип, gain, EQ, Level)", color = Nux.TextHi, fontSize = 13.sp,
+                        modifier = Modifier.weight(1f))
+                    OnOffPills(on = vm.writeAmpBlock, accent = Nux.Amp) { vm.setWriteAmpBlock(it) }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Эффекты (бустер, дилей, ревер)", color = Nux.TextHi, fontSize = 13.sp,
+                        modifier = Modifier.weight(1f))
+                    OnOffPills(on = vm.writeEffects, accent = Nux.Boost) { vm.setWriteEffects(it) }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Шумодав", color = Nux.TextHi, fontSize = 13.sp,
+                        modifier = Modifier.weight(1f))
+                    OnOffPills(on = vm.writeGate, accent = Nux.Gate) { vm.setWriteGate(it) }
                 }
             }
         }
     }
 }
+
+/**
+ * The knobs that fix a preset, under the preset itself.
+ *
+ * A preset that lands wrong used to mean a trip to the Патч tab to hunt for
+ * the right block, or waiting for me to change a value in code and rebuild.
+ * These edit the live tone: turning a knob sends it to the amp immediately, so
+ * a boomy clean patch is a two-second fix, and "Сохранить как свой" keeps the
+ * result in the library.
+ *
+ * Amp type is first and shows its wire index, because which index is which
+ * character on Gen 3 is still unconfirmed — if 1 is not Clean here, that is
+ * worth knowing and the number is what tells me.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PresetTuner(vm: KatanaViewModel, preset: Patch) {
+    var savedAs by remember { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Nux.Stroke))
+
+        val type = vm.paramValues[KatanaParams.AMP_TYPE.id] ?: 1
+        Text("Тип усилителя", color = Nux.TextLo, fontSize = 12.sp)
+        ChipRow(
+            KatanaParams.AMP_TYPES.mapIndexed { i, name -> "$i·$name" },
+            KatanaParams.AMP_TYPE.indexOfValue(type),
+            Nux.Amp,
+        ) { idx -> vm.setParam(KatanaParams.AMP_TYPE, KatanaParams.AMP_TYPE.valueOfIndex(idx)) }
+
+        // Gain, EQ and Level: everything the reported problems were about.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TUNER_KNOBS.forEach { param ->
+                val v = vm.paramValues[param.id] ?: param.default
+                Knob(param.label, v, param.min, param.max, blockColorFor(param.category)) {
+                    vm.setParam(param, it)
+                }
+            }
+        }
+
+        Text("Блоки", color = Nux.TextLo, fontSize = 12.sp)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TUNER_SWITCHES.forEach { param ->
+                val on = (vm.paramValues[param.id] ?: 0) != 0
+                Pill(blockShortFor(param.category), selected = on,
+                    accent = blockColorFor(param.category)) {
+                    vm.setParam(param, if (on) 0 else 1)
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Pill("Сбросить к пресету", selected = false, accent = Nux.Orange) {
+                vm.applyPatch(preset)
+            }
+            Pill("Сохранить как свой", selected = true, accent = Nux.Gate) {
+                val name = vm.saveTunedPreset(preset.name)
+                savedAs = "Сохранён в «Библиотеку» как «$name»"
+            }
+        }
+        if (savedAs.isNotEmpty()) {
+            Text(savedAs, color = Nux.Gate, fontSize = 11.sp)
+        }
+    }
+}
+
+/** Gain, EQ and Level — the controls a preset actually gets fixed with. */
+private val TUNER_KNOBS = listOfNotNull(
+    KatanaParams.BY_ID["gain"],
+    KatanaParams.BY_ID["bass"],
+    KatanaParams.BY_ID["middle"],
+    KatanaParams.BY_ID["treble"],
+    KatanaParams.BY_ID["presence"],
+    KatanaParams.BY_ID["volume"],
+    KatanaParams.BY_ID["reverb_level"],
+    KatanaParams.BY_ID["delay_level"],
+)
+
+/** The block on/off switches worth reaching without leaving this tab. */
+private val TUNER_SWITCHES = listOfNotNull(
+    KatanaParams.BY_ID["boost_sw"],
+    KatanaParams.BY_ID["delay_sw"],
+    KatanaParams.BY_ID["reverb_sw"],
+    KatanaParams.BY_ID["ns_sw"],
+)
 
 @Composable
 private fun JamScreen(vm: KatanaViewModel) {
@@ -649,7 +764,7 @@ private fun MiniPlayer(vm: KatanaViewModel) {
             TransportButton("⏭") { vm.playNext() }
         }
         if (expanded) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, bottom = 8.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
                 val dur = if (jam.durationMs > 0) jam.durationMs else 1
                 Slider(
                     value = jam.positionMs.coerceIn(0, dur).toFloat(),

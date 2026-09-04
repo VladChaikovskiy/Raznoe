@@ -621,6 +621,26 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Keep the tone as it stands right now under a name based on [presetName].
+     *
+     * The per-preset knobs edit the live tone, which lasts until the next
+     * preset load; this is how a fix that worked survives. Returns the name it
+     * was saved under.
+     */
+    fun saveTunedPreset(presetName: String): String {
+        val base = presetName.removePrefix("★ ").trim().ifBlank { "Мой тон" }
+        var name = "$base (мой)"
+        var n = 2
+        while (patches.any { it.name == name }) {
+            name = "$base (мой $n)"
+            n++
+        }
+        capturePatch(name)
+        logAction("", "Сохранён свой вариант пресета: «$name»")
+        return name
+    }
+
     fun deletePatch(name: String) {
         patchStore.delete(name)
         refreshPatches()
