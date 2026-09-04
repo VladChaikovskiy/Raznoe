@@ -147,9 +147,10 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     var writeGate by mutableStateOf(true)
         private set
 
-    fun setWriteAmpBlock(on: Boolean) { writeAmpBlock = on }
-    fun setWriteEffects(on: Boolean) { writeEffects = on }
-    fun setWriteGate(on: Boolean) { writeGate = on }
+    // Not setWriteX: a `var writeX` already occupies that JVM signature.
+    fun allowAmpBlock(on: Boolean) { writeAmpBlock = on }
+    fun allowEffects(on: Boolean) { writeEffects = on }
+    fun allowGate(on: Boolean) { writeGate = on }
 
     /** Which sections of a patch may be sent, per the switches above. */
     private fun allowedForPreset(param: KatanaParam): Boolean = when (param.category) {

@@ -431,19 +431,19 @@ private fun PresetsScreen(vm: KatanaViewModel) {
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Усилитель (тип, gain, EQ, Level)", color = Nux.TextHi, fontSize = 13.sp,
                         modifier = Modifier.weight(1f))
-                    OnOffPills(on = vm.writeAmpBlock, accent = Nux.Amp) { vm.setWriteAmpBlock(it) }
+                    OnOffPills(on = vm.writeAmpBlock, accent = Nux.Amp) { vm.allowAmpBlock(it) }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Эффекты (бустер, дилей, ревер)", color = Nux.TextHi, fontSize = 13.sp,
                         modifier = Modifier.weight(1f))
-                    OnOffPills(on = vm.writeEffects, accent = Nux.Boost) { vm.setWriteEffects(it) }
+                    OnOffPills(on = vm.writeEffects, accent = Nux.Boost) { vm.allowEffects(it) }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("Шумодав", color = Nux.TextHi, fontSize = 13.sp,
                         modifier = Modifier.weight(1f))
-                    OnOffPills(on = vm.writeGate, accent = Nux.Gate) { vm.setWriteGate(it) }
+                    OnOffPills(on = vm.writeGate, accent = Nux.Gate) { vm.allowGate(it) }
                 }
             }
         }
