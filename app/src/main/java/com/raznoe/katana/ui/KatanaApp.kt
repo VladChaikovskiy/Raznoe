@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -48,7 +50,9 @@ import com.raznoe.katana.DeviceInfo
 import com.raznoe.katana.KatanaViewModel
 import com.raznoe.katana.audio.JamOutput
 import com.raznoe.katana.model.FactoryPresets
+import com.raznoe.katana.model.MusicLibrary
 import com.raznoe.katana.model.Patch
+import com.raznoe.katana.model.Tracks
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.ParamKind
@@ -386,9 +390,15 @@ private fun PresetsScreen(vm: KatanaViewModel) {
 @Composable
 private fun JamScreen(vm: KatanaViewModel) {
     val jam = vm.jam
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { vm.addTrack(it) }
+    var search by remember { mutableStateOf("") }
+    // Asking for the persistable grant is what makes a hand-picked file still
+    // open after a restart; the stock OpenDocument contract does not.
+    val picker = rememberLauncherForActivityResult(PickAudio()) { uris ->
+        vm.addTracks(uris)
     }
+    val musicPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> vm.scanLibrary(granted) }
     LaunchedEffect(jam.isPlaying) {
         while (jam.isPlaying) { jam.refreshPosition(); delay(400) }
     }
@@ -406,7 +416,7 @@ private fun JamScreen(vm: KatanaViewModel) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Text("Джем", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Pill("+ MP3", selected = true, accent = Nux.Orange) { picker.launch(arrayOf("audio/*")) }
+            Pill("+ файл", selected = true, accent = Nux.Orange) { picker.launch(Unit) }
         }
 
         // Now playing: name, seek, transport with Play/Pause/Stop
@@ -494,28 +504,70 @@ private fun JamScreen(vm: KatanaViewModel) {
             OnOffPills(on = vm.lockHardwareKeys, accent = Nux.Orange) { vm.setKeyLock(it) }
         }
 
-        // Track list fills the rest and scrolls internally
-        if (vm.tracks.isEmpty()) {
-            Text("Пусто — жми «+ MP3».", color = Nux.TextLo, fontSize = 12.sp)
+        // Access to the phone's music, then search, then the list itself.
+        if (!vm.musicAccess) {
+            Panel(accent = Nux.Amp) {
+                Text(
+                    "Дай доступ к музыке — и все треки с телефона появятся здесь сами.",
+                    color = Nux.TextHi, fontSize = 12.sp,
+                )
+                Pill("Разрешить доступ к музыке", selected = true, accent = Nux.Orange) {
+                    musicPermission.launch(MusicLibrary.permission())
+                }
+            }
         }
-        val playingIndex = vm.currentTrack
-        Column(
-            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                label = { Text("поиск по названию / артисту") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Pill("⟳", selected = vm.scanningLibrary, accent = Nux.Orange) {
+                vm.scanLibrary(vm.hasMusicPermission())
+            }
+        }
+
+        val shown = Tracks.filter(vm.tracks, search)
+        Text(
+            if (vm.libraryStatus.isEmpty()) "Треков: ${shown.size}"
+            else "${vm.libraryStatus} · показано: ${shown.size}",
+            color = Nux.TextLo, fontSize = 11.sp,
+        )
+
+        // LazyColumn, not a scrolling Column: a phone library runs to hundreds
+        // of tracks and composing every row at once makes the tab crawl.
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            vm.tracks.forEachIndexed { i, t ->
+            items(shown, key = { it.uri }) { t ->
+                val playing = jam.trackUri == t.uri
                 Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        t.name,
-                        color = if (playingIndex == i) Nux.Orange else Nux.TextHi,
-                        modifier = Modifier.weight(1f).clickable { vm.playTrack(i) },
-                        maxLines = 1, fontSize = 13.sp,
-                    )
-                    Pill("▶", selected = false, accent = Nux.Orange) { vm.playTrack(i) }
-                    Box(Modifier.padding(start = 8.dp)) {
-                        Pill("✕", selected = false, accent = Nux.Amp) { vm.removeTrack(i) }
+                    Column(
+                        Modifier.weight(1f).clickable { vm.playTrack(t) },
+                    ) {
+                        Text(
+                            (if (playing) "▶ " else "") + t.name,
+                            color = if (playing) Nux.Orange else Nux.TextHi,
+                            maxLines = 1, fontSize = 13.sp,
+                        )
+                        val sub = Tracks.subtitle(t)
+                        if (sub.isNotEmpty()) {
+                            Text(sub, color = Nux.TextLo, fontSize = 10.sp, maxLines = 1)
+                        }
+                    }
+                    // Only hand-picked files can be removed; a library track
+                    // would just come back on the next scan.
+                    if (!t.fromLibrary) {
+                        Box(Modifier.padding(start = 8.dp)) {
+                            Pill("✕", selected = false, accent = Nux.Amp) { vm.removeTrack(t) }
+                        }
                     }
                 }
             }

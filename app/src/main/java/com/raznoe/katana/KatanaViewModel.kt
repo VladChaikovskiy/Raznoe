@@ -3,6 +3,7 @@ package com.raznoe.katana
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
@@ -14,14 +15,17 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.raznoe.katana.audio.Jam
 import com.raznoe.katana.audio.JamPlayer
 import com.raznoe.katana.model.FactoryPresets
+import com.raznoe.katana.model.MusicLibrary
 import com.raznoe.katana.model.Patch
 import com.raznoe.katana.model.PatchStore
 import com.raznoe.katana.model.Track
 import com.raznoe.katana.model.TrackStore
+import com.raznoe.katana.model.Tracks
 import com.raznoe.katana.protocol.KatanaParam
 import com.raznoe.katana.protocol.KatanaParams
 import com.raznoe.katana.protocol.KatanaSysEx
@@ -94,7 +98,21 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     val patches = mutableStateListOf<Patch>()
 
     // --- Jam player state -------------------------------------------------
+    /** What the Jam tab shows: the phone's library plus hand-picked files. */
     val tracks = mutableStateListOf<Track>()
+
+    /** Hand-picked files (persisted); library tracks are re-found on each scan. */
+    private val pickedTracks = mutableListOf<Track>()
+    private var libraryTracks: List<Track> = emptyList()
+
+    /** True once the user has granted access to the phone's music. */
+    var musicAccess by mutableStateOf(false)
+        private set
+    var libraryStatus by mutableStateOf("")
+        private set
+    var scanningLibrary by mutableStateOf(false)
+        private set
+
     var activePreset by mutableStateOf("")
         private set
     /**
@@ -111,19 +129,24 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
         refreshDevices()
         refreshPatches()
-        tracks.addAll(trackStore.list())
+        pickedTracks.addAll(trackStore.list().filterNot { it.fromLibrary })
+        rebuildTrackList()
         jam.onLog = { line -> logAction("", line) }
         lastCrash = KatanaApplication.lastCrash(app)
+        // Pull the phone's music in straight away when access is already
+        // granted, so the Jam tab is populated before it is even opened.
+        scanLibrary(hasMusicPermission())
     }
+
+    fun hasMusicPermission(): Boolean = runCatching {
+        ContextCompat.checkSelfPermission(app, MusicLibrary.permission()) ==
+            PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
 
     fun dismissCrashReport() {
         KatanaApplication.clearCrash(app)
         lastCrash = null
     }
-
-    /** The track currently loaded in the player, as an index into [tracks]. */
-    val currentTrack: Int?
-        get() = jam.trackUri?.let { uri -> tracks.indexOfFirst { it.uri == uri }.takeIf { it >= 0 } }
 
     // --- Device discovery / connection -----------------------------------
     fun refreshDevices() {
@@ -468,32 +491,96 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         refreshPatches()
     }
 
-    // --- Jam player (MP3 backing tracks) ---------------------------------
-    fun addTrack(uri: Uri) {
-        runCatching {
-            app.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
+    // --- Jam tracks -------------------------------------------------------
+
+    /**
+     * Read the phone's music library.
+     *
+     * The cursor walks every audio file, so it runs on its own thread — on a
+     * phone with a few thousand tracks doing this on the main thread is a
+     * visible freeze.
+     */
+    fun scanLibrary(hasPermission: Boolean) {
+        musicAccess = hasPermission
+        if (!hasPermission) {
+            libraryTracks = emptyList()
+            libraryStatus = "Нет доступа к музыке телефона"
+            rebuildTrackList()
+            return
         }
-        val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "track"
-        if (tracks.none { it.uri == uri.toString() }) {
-            tracks.add(Track(uri.toString(), name))
-            runCatching { trackStore.saveAll(tracks.toList()) }
-        }
-        logAction("", "Джем: добавлен трек «$name»")
+        if (scanningLibrary) return
+        scanningLibrary = true
+        libraryStatus = "Читаю музыку телефона…"
+        Thread {
+            val found = runCatching { MusicLibrary.query(app) }
+            onMain {
+                scanningLibrary = false
+                libraryTracks = found.getOrDefault(emptyList())
+                libraryStatus = when {
+                    found.isFailure -> "Не удалось прочитать медиатеку: ${found.exceptionOrNull()?.message}"
+                    libraryTracks.isEmpty() -> "Музыка на телефоне не найдена — добавь файл кнопкой «+ файл»"
+                    else -> "Музыка телефона: ${libraryTracks.size}"
+                }
+                rebuildTrackList()
+                logAction("", "Джем: медиатека — ${libraryTracks.size} треков")
+            }
+        }.apply { isDaemon = true }.start()
     }
 
-    fun removeTrack(index: Int) {
-        val t = tracks.getOrNull(index) ?: return
-        if (jam.trackUri == t.uri) jam.stop()
-        tracks.removeAt(index)
-        runCatching { trackStore.saveAll(tracks.toList()) }
+    private fun rebuildTrackList() {
+        val merged = Tracks.merge(libraryTracks, pickedTracks)
+        tracks.clear()
+        tracks.addAll(merged)
     }
 
-    fun playTrack(index: Int) {
-        val t = tracks.getOrNull(index) ?: return
-        jam.play(t.uri, t.name)
+    /**
+     * Add a file chosen through the system picker.
+     *
+     * The picker asks for a PERSISTABLE grant (see [com.raznoe.katana.ui.PickAudio]),
+     * so taking it here succeeds and the track still opens after a restart. It
+     * used to throw and be swallowed, which is why hand-added tracks "lost
+     * access to the file" later on.
+     */
+    fun addTracks(uris: List<Uri>) {
+        var added = 0
+        var failed = 0
+        for (uri in uris) {
+            val held = runCatching {
+                app.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            if (held.isFailure) {
+                failed++
+                logAction("", "Джем: не удалось закрепить доступ к $uri: ${held.exceptionOrNull()?.message}")
+            }
+            val key = uri.toString()
+            if (pickedTracks.any { it.uri == key } || libraryTracks.any { it.uri == key }) continue
+            val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "трек"
+            pickedTracks.add(Track(uri = key, name = name))
+            added++
+        }
+        runCatching { trackStore.saveAll(pickedTracks.toList()) }
+        rebuildTrackList()
+        libraryStatus = when {
+            uris.isEmpty() -> "Ничего не выбрано"
+            added == 0 -> "Уже в списке"
+            failed > 0 -> "Добавлено: $added (у $failed не закрепился доступ)"
+            else -> "Добавлено: $added"
+        }
+        logAction("", "Джем: добавлено файлов — $added из ${uris.size}")
     }
+
+    /** Hand-picked tracks can be removed; library tracks come back on rescan. */
+    fun removeTrack(track: Track) {
+        if (track.fromLibrary) return
+        if (jam.trackUri == track.uri) jam.stop()
+        pickedTracks.removeAll { it.uri == track.uri }
+        runCatching { trackStore.saveAll(pickedTracks.toList()) }
+        rebuildTrackList()
+    }
+
+    fun playTrack(track: Track) = jam.play(track.uri, track.name)
 
     private fun queryDisplayName(uri: Uri): String? =
         runCatching {

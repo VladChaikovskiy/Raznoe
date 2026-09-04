@@ -16,6 +16,16 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Read the phone's music library so the Jam tab fills itself instead of
+        making you hand-pick every backing track. The permission for audio
+        moved out of storage in Android 13.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:name=".KatanaApplication"
         android:allowBackup="true"
@@ -25,11 +35,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.KatanaController">
 
+        <!--
+            launchMode is singleTop, not singleTask: the USB-attach filter needs
+            the existing instance reused (onNewIntent), which singleTop gives
+            us, but singleTask also makes the activity a task root — and a task
+            root can be handed a cancelled result when it launches another app
+            for a result, which is how picking an MP3 in the system file picker
+            silently added nothing.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.KatanaController">
 
             <intent-filter>
