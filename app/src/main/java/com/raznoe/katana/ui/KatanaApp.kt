@@ -972,6 +972,17 @@ private fun DiagnosticsScreen(vm: KatanaViewModel) {
                     "скажи мне, какой именно.",
                 color = Nux.TextLo, fontSize = 11.sp,
             )
+            Text(
+                "Поле типа: ${vm.ampTypeSpaceLabel}",
+                color = Nux.TextHi, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                "У комбика два поля типа усилителя с несовместимыми кодами: панельное " +
+                    "(5 характеров) и расширенное (28 моделей GT-100), где 1 — это FULL " +
+                    "RANGE, симулятор акустики, а Clean — 8. Приложение определяет нужное " +
+                    "по ответу комбика после «Прочитать всё».",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KatanaParams.AMP_TYPES.forEachIndexed { i, name ->

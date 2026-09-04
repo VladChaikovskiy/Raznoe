@@ -311,6 +311,32 @@ object KatanaParams {
 
     // ---- Channel / preset select (00 01 00 00) --------------------------
     val CURRENT_PRESET_ADDR = a(0x00, 0x01, 0x00, 0x00)
+    /**
+     * The real preamp model each panel character loads by default.
+     *
+     * The amp has TWO amp-type fields, and they use different codes. The panel
+     * byte (00 00 04 20) is the five LED positions. The preamp byte
+     * (60 00 00 51, "preamp_a_type") picks one of 28 GT-100 models, and there
+     * the same small numbers mean something else entirely — 0x01 is FULL
+     * RANGE, the acoustic simulator, while Clean is 0x08 (JC-120). Sending a
+     * panel code into the preamp field is therefore a way to land on an
+     * acoustic sim while believing you asked for Clean, and that sounds like a
+     * boomy double bass through an electric guitar.
+     *
+     * Indexed by panel code: Acoustic, Clean, Crunch, Lead, Brown.
+     * (docs/katana-address-map.md; katana-dev/docs tables/amp-types.md)
+     */
+    val PREAMP_TYPE_FOR_PANEL = intArrayOf(0x01, 0x08, 0x0B, 0x18, 0x17)
+
+    /** MkII address of the 28-model preamp type, separate from the panel byte. */
+    val PREAMP_TYPE_ADDR = a(0x60, 0x00, 0x00, 0x51)
+
+    /**
+     * True if [value] cannot be a panel character code, which means the field
+     * it came from is the 28-model preamp space rather than the panel space.
+     */
+    fun isPreampSpaceValue(value: Int): Boolean = value > AMP_TYPES.lastIndex
+
     /** Data byte per channel: Panel=0, CH1..CH4 = 1..4. */
     val CHANNELS = listOf("Panel" to 0, "CH1" to 1, "CH2" to 2, "CH3" to 3, "CH4" to 4)
 

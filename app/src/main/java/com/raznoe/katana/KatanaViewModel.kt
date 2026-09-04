@@ -48,14 +48,22 @@ data class DiagBlock(val label: String, val address: IntArray, val size: Int) {
 }
 
 /**
- * The Gen 3 blocks that decide the tone. Reading these back is how a wrong
- * address gets found: turn a knob on the amp, read again, see which byte moved.
+ * The blocks that decide the tone, in both address spaces.
+ *
+ * Reading these back is how a wrong address gets found: turn a knob on the amp,
+ * read again, see which byte moved. Both generations are listed because which
+ * one an amp answers on is itself the question — if the MkII panel block comes
+ * back with data, that is the space in use, whatever the profile says.
  */
 val DIAG_BLOCKS = listOf(
-    DiagBlock("усилитель", intArrayOf(0x20, 0x00, 0x06, 0x00), 16),
-    DiagBlock("вкл/выкл эффектов", intArrayOf(0x20, 0x00, 0x08, 0x00), 16),
-    DiagBlock("слоты FX-BOX", intArrayOf(0x20, 0x00, 0x04, 0x00), 8),
-    DiagBlock("шумодав", intArrayOf(0x20, 0x00, 0x58, 0x00), 4),
+    DiagBlock("MkII: панель+усилитель", intArrayOf(0x00, 0x00, 0x04, 0x00), 0x2A),
+    DiagBlock("MkII: preamp-модель", intArrayOf(0x60, 0x00, 0x00, 0x50), 16),
+    DiagBlock("MkII: бустер", intArrayOf(0x60, 0x00, 0x00, 0x30), 16),
+    DiagBlock("MkII: шумодав", intArrayOf(0x60, 0x00, 0x06, 0x63), 4),
+    DiagBlock("Gen3: усилитель", intArrayOf(0x20, 0x00, 0x06, 0x00), 16),
+    DiagBlock("Gen3: вкл/выкл эффектов", intArrayOf(0x20, 0x00, 0x08, 0x00), 16),
+    DiagBlock("Gen3: слоты FX-BOX", intArrayOf(0x20, 0x00, 0x04, 0x00), 8),
+    DiagBlock("Gen3: шумодав", intArrayOf(0x20, 0x00, 0x58, 0x00), 4),
 )
 
 class KatanaViewModel(app: Application) : AndroidViewModel(app) {
@@ -430,6 +438,17 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     /** Current dialect, for the diagnostics screen. */
     val profileLabel: String
         get() = "${KatanaSysEx.generation}  ${KatanaSysEx.headerHex()}"
+
+    /**
+     * Which amp-type field the amp turned out to expose. The two use
+     * incompatible codes, so this decides what a character selection sends.
+     */
+    val ampTypeSpaceLabel: String
+        get() = if (controller?.ampTypeIsPreampSpace == true) {
+            "расширенное (28 моделей GT-100)"
+        } else {
+            "панельное (5 характеров)"
+        }
 
     /** Pick the dialect by hand when auto-detection did not fire. */
     fun forceProfile(gen: KatanaSysEx.Gen) {

@@ -122,4 +122,31 @@ class AddressMapTest {
         assertNull("нет блока 00 00 04 00", if (panel == null) "missing" else null)
         assertEquals(0x2A, panel!!.size)
     }
+
+    /**
+     * The amp has two amp-type fields with incompatible codes, and confusing
+     * them is a way to select the acoustic simulator while asking for Clean.
+     * Panel: 0 Acoustic..4 Brown. Preamp models: 0x01 FULL RANGE, 0x08 JC-120,
+     * 0x0B TWEED, 0x18 5150 DRIVE, 0x17 SLDN.
+     */
+    @Test fun preampModels_matchEachPanelCharacter() {
+        assertEquals(
+            listOf(0x01, 0x08, 0x0B, 0x18, 0x17),
+            KatanaParams.PREAMP_TYPE_FOR_PANEL.toList(),
+        )
+        assertEquals(KatanaParams.AMP_TYPES.size, KatanaParams.PREAMP_TYPE_FOR_PANEL.size)
+        assertArrayEquals(intArrayOf(0x60, 0x00, 0x00, 0x51), KatanaParams.PREAMP_TYPE_ADDR)
+        // Clean must never be sent as 1 into the preamp field: that is FULL RANGE.
+        assertEquals(0x08, KatanaParams.PREAMP_TYPE_FOR_PANEL[1])
+    }
+
+    /** A value above 4 can only have come from the 28-model field. */
+    @Test fun preampSpace_isRecognisedByAnOutOfPanelRangeValue() {
+        for (v in 0..4) {
+            assertEquals("панельное $v", false, KatanaParams.isPreampSpaceValue(v))
+        }
+        for (v in listOf(5, 8, 0x0B, 0x18, 27)) {
+            assertEquals("расширенное $v", true, KatanaParams.isPreampSpaceValue(v))
+        }
+    }
 }

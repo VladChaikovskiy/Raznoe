@@ -56,6 +56,7 @@ class KatanaController(private val connection: UsbMidiConnection) {
         KatanaSysEx.parseIdentityReply(sysex)?.let { onIdentity?.invoke(it) }
         KatanaSysEx.parse(sysex)?.let { inc ->
             captureSelectors(inc)
+            noteAmpTypeReading(inc)
             onIncoming?.invoke(inc)
         }
     }
@@ -91,6 +92,58 @@ class KatanaController(private val connection: UsbMidiConnection) {
     }
 
     /**
+     * True once the amp has reported an amp-type value that cannot be a panel
+     * character, which tells us that field holds the 28-model preamp code.
+     *
+     * It matters because the two spaces disagree about small numbers: 1 is
+     * Clean on the panel but FULL RANGE — the acoustic simulator — among the
+     * preamp models. Writing the wrong space is how "Clean" ends up sounding
+     * like a boomy double bass, so we let the amp tell us which one it is.
+     */
+    @Volatile var ampTypeIsPreampSpace = false
+        private set
+
+    /** Watch inbound data for the amp-type byte and learn which space it uses. */
+    private fun noteAmpTypeReading(inc: KatanaSysEx.Incoming) {
+        if (ampTypeIsPreampSpace) return
+        val gen3 = KatanaSysEx.generation == KatanaSysEx.Gen.GEN3
+        val addr = KatanaParams.AMP_TYPE.addressFor(gen3)
+        val a = inc.address
+        if (a.size != 4) return
+        if (a[0] != addr[0] || a[1] != addr[1] || a[2] != addr[2]) return
+        val offset = addr[3] - a[3]
+        if (offset < 0 || offset >= inc.data.size) return
+        val value = inc.data[offset] and 0x7F
+        if (!KatanaParams.isPreampSpaceValue(value)) return
+        ampTypeIsPreampSpace = true
+        onInfo?.invoke(
+            "✓ поле типа усилителя расширенное (28 моделей): комбик вернул $value. " +
+                "Переключаюсь на коды моделей.",
+        )
+    }
+
+    /** The code to send for panel character [panel], in whichever space applies. */
+    private fun ampTypeWire(panel: Int): Int = if (ampTypeIsPreampSpace) {
+        KatanaParams.PREAMP_TYPE_FOR_PANEL.getOrElse(panel) { panel }
+    } else {
+        panel
+    }
+
+    /**
+     * The preamp model to set alongside the panel byte, on MkII only.
+     *
+     * Setting both means the character lands whichever field the amp actually
+     * acts on. Gen 3 is left out: its preamp address is not known, and poking
+     * a MkII address on it would be a guess with a real amp on the other end.
+     */
+    private fun preampFrameFor(param: KatanaParam, value: Int): ByteArray? {
+        if (param.id != KatanaParams.AMP_TYPE.id) return null
+        if (KatanaSysEx.generation == KatanaSysEx.Gen.GEN3) return null
+        val model = KatanaParams.PREAMP_TYPE_FOR_PANEL.getOrNull(value) ?: return null
+        return KatanaSysEx.buildSet(KatanaParams.PREAMP_TYPE_ADDR, model)
+    }
+
+    /**
      * The wire address to use for [param] right now. Banked Gen 3 effect params
      * resolve through the live selector cache; everything else is static.
      */
@@ -117,6 +170,11 @@ class KatanaController(private val connection: UsbMidiConnection) {
     }
 
     private fun encode(param: KatanaParam, value: Int): IntArray {
+        // The amp type is the one parameter whose wire code depends on which
+        // field the amp exposes (see ampTypeIsPreampSpace).
+        if (param.id == KatanaParams.AMP_TYPE.id) {
+            return intArrayOf(ampTypeWire(value) and 0x7F)
+        }
         // ENUM wire values can have gaps (e.g. Chorus == 29 while max index is
         // smaller), so only clamp continuous/toggle params.
         val v = if (param.kind == ParamKind.ENUM) value and 0x7F
@@ -148,6 +206,7 @@ class KatanaController(private val connection: UsbMidiConnection) {
     fun setParam(param: KatanaParam, value: Int) {
         val data = encode(param, value)
         for (addr in addressesFor(param)) enqueueParam(addr, data)
+        preampFrameFor(param, value)?.let { enqueue(it, settleMs = PARAM_SETTLE_MS) }
         sendToggleCc(param, value)
     }
 
@@ -195,6 +254,7 @@ class KatanaController(private val connection: UsbMidiConnection) {
         for ((param, value) in entries) {
             val data = encode(param, value)
             for (addr in addressesFor(param)) frames.add(KatanaSysEx.buildSet(addr, data))
+            preampFrameFor(param, value)?.let { frames.add(it) }
         }
         // The block on/off switches need their documented CC as well, for the
         // same reason a single knob does: the SysEx toggle only bites when the
