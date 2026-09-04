@@ -27,10 +27,16 @@ import com.raznoe.katana.protocol.ParamKind
  *  2. **Validity.** Every value is a code the amp implements (see
  *     [KatanaParams.sanitize]); enum lists have gaps and an unimplemented code
  *     leaves a block in an undefined state.
- *  3. **A quiet noise floor** (see [polish]): a firm gate on every tone, a
- *     ceiling on gain/presence, a high cut in the wet path, full dry signal
- *     through delay/reverb, and Mod/FX blocks left off unless their type is one
- *     we can actually configure.
+ *  3. **Only the corrections that make a patch work** (see [polish]): full dry
+ *     signal through delay/reverb, Mod/FX left off unless their type is one we
+ *     can configure, and a light gate on genuinely distorted tones.
+ *
+ * What it deliberately does NOT do is reshape a tone. Ceilings on gain,
+ * presence and treble, forced high cuts in the wet path, and a gate on every
+ * preset all used to live here, and between them they turned the clean presets
+ * into a duller, choked version of themselves — nothing like the Librarian
+ * original. An imported patch now keeps Librarian's own gain, EQ, levels and
+ * filters; the only thing ever changed is a Level so low it recalls as silence.
  */
 object FactoryPresets {
 
@@ -63,21 +69,44 @@ object FactoryPresets {
     // ---- Finishing pipeline ---------------------------------------------
 
     /**
-     * Expand [raw] to the full parameter set, make every value legal, then
-     * quiet the tone down and level its loudness.
+     * Expand [raw] to the full parameter set and make every value legal.
+     *
+     * @param imported true for a patch decoded from the Katana Librarian. Its
+     *   gain, EQ, levels and filters are then left exactly as Librarian has
+     *   them — that IS the tone, and reshaping it is what made the clean
+     *   presets come out dull and unlike the original.
      */
-    private fun finish(name: String, note: String, raw: Map<String, Int>): Patch {
+    private fun finish(
+        name: String,
+        note: String,
+        raw: Map<String, Int>,
+        imported: Boolean,
+    ): Patch {
         val v = LinkedHashMap<String, Int>()
         // 1) Full, deterministic baseline — nothing is left to the previous patch.
         for (p in KatanaParams.ALL) v[p.id] = KatanaParams.neutral(p)
         // 2) The preset's own values on top (unknown ids are dropped, not sent).
         for ((id, value) in raw) if (KatanaParams.BY_ID[id] != null) v[id] = value
-        // 3) Legal values, quiet noise floor, matched loudness.
+        // 3) Legal values, then the few corrections that are about the patch
+        //    working at all rather than about how it is voiced.
         sanitize(v)
         polish(v)
-        v["volume"] = normalizedLevel(v)
-        sanitize(v) // polish/level results are clamped too
-        return Patch(name = name, values = v, note = note)
+        var extraNote = ""
+        v["volume"] = if (imported) {
+            // Only ever RAISE an unusably quiet Level. A dozen of the decoded
+            // demos sit at 19-32, which recalls as near-silence and reads as
+            // "the preset didn't load"; a Level is also the one thing here
+            // that is about being heard rather than about the voicing. Never
+            // lower one — that is Librarian's value — and say so on screen
+            // when we did raise it, so the difference is not a secret.
+            val original = v["volume"] ?: MIN_LEVEL
+            if (original < MIN_LEVEL) extraNote = " · Level поднят $original→$MIN_LEVEL"
+            original.coerceAtLeast(MIN_LEVEL)
+        } else {
+            normalizedLevel(v)
+        }
+        sanitize(v)
+        return Patch(name = name, values = v, note = note + extraNote)
     }
 
     private fun sanitize(v: LinkedHashMap<String, Int>) {
@@ -88,59 +117,64 @@ object FactoryPresets {
     }
 
     /**
-     * Everything that makes a preset sound clean rather than hissy.
+     * The corrections that are about a patch WORKING, not about how it sounds.
      *
-     * The Katana's own noise floor plus single-coil hum is what the user hears
-     * as "фон" between notes; a high-gain patch with the gate off, presence
-     * maxed and a bright delay/reverb tail amplifies all of it.
+     * Everything here has a failure it prevents. Nothing here reshapes a tone:
+     * ceilings on gain/presence/treble and forced high cuts in the wet path
+     * used to live in this function, and between them they turned every clean
+     * preset into a duller, darker version of itself — nothing like Librarian.
      */
     private fun polish(v: LinkedHashMap<String, Int>) {
-        // Runaway gain past ~82 is mostly compression and hiss, not more tone.
-        v["gain"] = (v["gain"] ?: 50).coerceAtMost(MAX_GAIN)
-        // Presence/treble ceilings: this is where fizz and hiss live.
-        v["presence"] = (v["presence"] ?: 50).coerceAtMost(85)
-        v["treble"] = (v["treble"] ?: 50).coerceAtMost(88)
-        // A booster running at 100 slams the amp input; back it off a touch.
-        v["boost_level"] = (v["boost_level"] ?: 70).coerceAtMost(88)
-
-        // Mod/FX: only switch on a block we can actually configure (see above).
+        // Mod/FX: only switch on a block we can actually configure. For Gen 3
+        // only a block's type and on/off are implemented, so an enabled type we
+        // cannot set up runs on the previous patch's parameters.
         if ((v["mod_type"] ?: -1) !in SAFE_MOD_FX) v["mod_sw"] = 0
         if ((v["fx_type"] ?: -1) !in SAFE_MOD_FX) v["fx_sw"] = 0
 
-        // Wet path: tame the top of the repeats/tail, keep rumble out of the
-        // reverb, and never let the dry guitar drop out of the mix.
-        if ((v["delay_sw"] ?: 0) == 1) {
-            v["delay_hc"] = (v["delay_hc"] ?: 12).coerceAtMost(12)   // ≤ 10 kHz
-            v["delay_direct"] = 100
-        }
-        if ((v["reverb_sw"] ?: 0) == 1) {
-            v["reverb_hc"] = (v["reverb_hc"] ?: 11).coerceAtMost(11) // ≤ 8 kHz
-            v["reverb_lc"] = (v["reverb_lc"] ?: 6).coerceAtLeast(4)  // ≥ 40 Hz
-            v["reverb_direct"] = 100
-        }
+        // Direct Mix below full drops the dry guitar out of the mix, which
+        // recalls as a patch that is all effect and no guitar.
+        if ((v["delay_sw"] ?: 0) == 1) v["delay_direct"] = 100
+        if ((v["reverb_sw"] ?: 0) == 1) v["reverb_direct"] = 100
 
         gate(v)
     }
 
     /**
-     * Engage the Noise Suppressor on EVERY preset and scale its threshold with
-     * how hot the tone is.
+     * Engage the Noise Suppressor only on a tone that is actually distorted,
+     * and then lightly.
      *
-     * The old rule only gated tones with gain ≥ 45 (or a booster), which left
-     * every clean and low-gain preset humming — and several imported demo
-     * patches shipped with the gate switched off entirely. We only ever RAISE
-     * the threshold, so a preset that already gates harder keeps its setting.
+     * The previous rule gated every preset with a threshold scaled to the amp's
+     * Gain knob. That was wrong twice over: a Clean channel at Gain 80 is still
+     * clean and quiet, and a threshold in the 45-60 band chokes the decay of
+     * every note — so clean presets came out muffled, and the quietest of them
+     * sounded like they had not loaded at all. Distortion is what hisses, so
+     * distortion is what decides: amp character first, booster drive second.
+     *
+     * A clean patch is left exactly as it came, gate and all. If a demo patch
+     * shipped with the Noise Suppressor off, it stays off — that is Librarian's
+     * setting, and the amp is not noisy on a clean channel.
      */
     private fun gate(v: LinkedHashMap<String, Int>) {
-        val gain = v["gain"] ?: 0
         val boosted = (v["boost_sw"] ?: 0) == 1
+        val drive = if (boosted) v["boost_drive"] ?: 0 else 0
+        val heat = when (v["amp_type"] ?: AMP_CLEAN) {
+            AMP_LEAD, AMP_BROWN -> 2
+            AMP_PUSHED, AMP_CRUNCH -> 1
+            else -> 0 // Acoustic, Clean — nothing to gate
+        } + if (drive >= HARD_DRIVE) 1 else 0
+
+        if (heat <= 0) return // clean stays untouched
+
         v["ns_sw"] = 1
-        var want = 18 + (gain * 45 / 100)
-        if (boosted) want += 4 + (v["boost_drive"] ?: 0) * 8 / 100
-        want = want.coerceIn(MIN_GATE, MAX_GATE)
+        val want = when (heat) {
+            1 -> 20
+            2 -> 27
+            else -> 34
+        }
+        // Only ever raise it: a patch that already gates harder keeps its own.
         if ((v["ns_thr"] ?: 0) < want) v["ns_thr"] = want
-        // Release below ~35 chatters on decaying notes; above ~70 it swallows them.
-        v["ns_rel"] = (v["ns_rel"] ?: 45).coerceIn(35, 70)
+        // Release under ~30 chatters on a decaying note; over ~70 swallows it.
+        v["ns_rel"] = (v["ns_rel"] ?: 45).coerceIn(30, 70)
     }
 
     /** Approximate equal-loudness amp Level from gain + boost drive/level. */
@@ -184,15 +218,23 @@ object FactoryPresets {
 
     private fun preset(name: String, note: String, build: Builder.() -> Unit): Patch {
         val b = Builder(); b.build()
-        return finish(name, note, b.v)
+        return finish(name, note, b.v, imported = false)
     }
 
     private const val N = "Моя версия (не оригинал JNs)"
 
-    /** Gain ceiling; past this it is hiss and compression, not tone. */
-    private const val MAX_GAIN = 82
-    private const val MIN_GATE = 22
-    private const val MAX_GATE = 62
+    // Amp characters, in the order [KatanaParams.AMP_TYPES] lists them.
+    private const val AMP_ACOUSTIC = 0
+    private const val AMP_CLEAN = 1
+    private const val AMP_PUSHED = 2
+    private const val AMP_CRUNCH = 3
+    private const val AMP_LEAD = 4
+    private const val AMP_BROWN = 5
+
+    /** Booster drive from which the pedal itself starts adding hiss. */
+    private const val HARD_DRIVE = 30
+
+    /** A Level under this recalls as near-silence; only used to raise one. */
     private const val MIN_LEVEL = 55
     private const val MAX_LEVEL = 92
 
@@ -215,7 +257,7 @@ object FactoryPresets {
     //      the ORIGINAL values (gain/EQ/levels/effects), not re-creations. Amp
     //      TYPE is mapped from the MkII code to the nearest Gen 3 amp model.
     private fun orig(name: String, values: Map<String, Int>): Patch =
-        finish(name, "Оригинал (демо BOSS / JuCaNeRy)", values)
+        finish(name, "Оригинал (демо BOSS / JuCaNeRy)", values, imported = true)
 
     val ORIGINALS: List<Patch> = listOf(
         orig("★ GMoore Solo", mapOf(
@@ -1077,7 +1119,7 @@ object FactoryPresets {
             amp(1, 30, 52, 50, 55, 45); delay(0, 600, 45, 50); reverb(3, level = 55, time = 80)
         },
         preset("Djent Tight", "$N · тугой современный хай-гейн, ноуз-гейт") {
-            amp(5, 90, 60, 42, 62, 52); ns(50)
+            amp(5, 90, 60, 42, 62, 52); ns(45)
         },
         preset("Country Twang", "$N · яркий кантри-твэнг, спринг-ревер") {
             amp(1, 30, 48, 55, 65, 55); boost(2, 30, 55); reverb(5, 28)

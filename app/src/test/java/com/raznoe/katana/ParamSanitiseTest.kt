@@ -53,16 +53,25 @@ class ParamSanitiseTest {
         assertEquals(100, KatanaParams.NEUTRAL["delay_direct"])
         assertEquals(100, KatanaParams.NEUTRAL["reverb_direct"])
         assertTrue((KatanaParams.NEUTRAL["volume"] ?: 0) >= 50)
-        // ...and quiet: the gate is on before any preset asks for it.
-        assertEquals(1, KatanaParams.NEUTRAL["ns_sw"])
     }
 
-    @Test fun neutral_leavesEveryEffectBlockOff() {
+    /**
+     * Neutral has to mean FLAT. A default high cut quietly dulls every preset
+     * that does not specify one, which is how the clean tones lost their top.
+     */
+    @Test fun neutral_filtersAreFlat() {
+        assertEquals(14, KatanaParams.NEUTRAL["delay_hc"])  // Flat
+        assertEquals(14, KatanaParams.NEUTRAL["reverb_hc"]) // Flat
+        assertEquals(0, KatanaParams.NEUTRAL["reverb_lc"])  // Flat
+    }
+
+    /** Including the gate: it belongs on distorted tones, not by default. */
+    @Test fun neutral_leavesEveryBlockOff() {
         var bad: String? = null
         for (p in KatanaParams.ALL) {
-            if (p.kind != ParamKind.TOGGLE || p.id == "ns_sw") continue
+            if (p.kind != ParamKind.TOGGLE) continue
             if (KatanaParams.neutral(p) != 0) bad = p.id
         }
-        assertNull("effect block on by default", bad)
+        assertNull("block on by default", bad)
     }
 }

@@ -330,15 +330,20 @@ object KatanaParams {
         // Mod / FX: off, benign type.
         "mod_sw" to 0, "mod_type" to 29,   // Chorus
         "fx_sw" to 0, "fx_type" to 3,      // Comp
-        // Delay: off; dry signal fully through, tame repeats.
+        // Delay: off, dry signal fully through, filters flat. "Neutral" has to
+        // mean flat: a default high cut dulls every preset that does not
+        // mention one, which is exactly how the clean tones lost their top end.
         "delay_sw" to 0, "delay_type" to 0, "delay_time" to 400, "delay_fb" to 20,
-        "delay_hc" to 12, "delay_level" to 40, "delay_direct" to 100,
-        // Reverb: off; dry fully through, no rumble in the tail.
+        "delay_hc" to 14, "delay_level" to 40, "delay_direct" to 100,
+        // Reverb: off, dry fully through, filters flat (14 = Flat high cut,
+        // 0 = Flat low cut).
         "reverb_sw" to 0, "reverb_type" to 1, "reverb_time" to 40, "reverb_pre" to 0,
-        "reverb_lc" to 6, "reverb_hc" to 11, "reverb_density" to 50,
+        "reverb_lc" to 0, "reverb_hc" to 14, "reverb_density" to 50,
         "reverb_level" to 35, "reverb_direct" to 100, "reverb_spring" to 50,
-        // Noise suppressor: on by default — this amp hisses without it.
-        "ns_sw" to 1, "ns_thr" to 30, "ns_rel" to 45,
+        // Noise suppressor: OFF by default. A gate is only wanted on a
+        // distorted tone (see FactoryPresets.gate); forcing one onto a clean
+        // patch chokes the note decay instead of cleaning anything up.
+        "ns_sw" to 0, "ns_thr" to 20, "ns_rel" to 45,
     )
 
     fun neutral(p: KatanaParam): Int = NEUTRAL[p.id] ?: when (p.kind) {
