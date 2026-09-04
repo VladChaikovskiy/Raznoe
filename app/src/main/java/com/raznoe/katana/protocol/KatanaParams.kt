@@ -293,6 +293,17 @@ object KatanaParams {
     data class ReadRange(val address: IntArray, val size: Int)
 
     /**
+     * Every banked effect slot, read back in full.
+     *
+     * Needed so a raw capture ("снять тон с комбика") carries the effects and
+     * not just the amp: whatever we never read, we cannot replay.
+     */
+    private val EFFECT_READ_RANGES: List<ReadRange> =
+        (BOOSTER_SLOTS + FX1_SLOTS + FX2_SLOTS + DELAY_SLOTS + REVERB_SLOTS).map { base ->
+            ReadRange(KatanaSysEx.gen3AddrFromBase(base, 0), 16)
+        } + listOf(ReadRange(a(0x20, 0x00, 0x58, 0x00), 8))
+
+    /**
      * Gen 3 initial-read sequence, decoded from the Katana Librarian app's k1()
      * for KATANA_MK3: a system probe, the 9 patch sections (Y0 base 0x20000000),
      * and a couple of small blocks. These are valid Gen 3 addresses that make the
@@ -320,7 +331,8 @@ object KatanaParams {
         // FX-BOX selector bytes (COLOR block): tells which physical slot each
         // effect occupies, so banked effect params resolve to the right address.
         ReadRange(a(0x20, 0x00, 0x04, 0x00), GEN3_SELECTOR_COUNT),
-    )
+    ) + EFFECT_READ_RANGES
+
 
     val READ_RANGES = listOf(
         ReadRange(a(0x00, 0x00, 0x04, 0x20), 0x0A),   // amp panel

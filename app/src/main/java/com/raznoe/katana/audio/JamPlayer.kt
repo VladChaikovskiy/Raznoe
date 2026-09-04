@@ -23,7 +23,16 @@ import androidx.core.content.ContextCompat
 
 /** Where the backing track should be sent. */
 enum class JamOutput(val label: String) {
-    /** Bluetooth if present, else the amp over USB, else the phone. */
+    /**
+     * Leave routing to Android, which already sends media to Bluetooth the
+     * moment it connects.
+     *
+     * This used to mean "force the sound into Bluetooth if present, else into
+     * USB audio", and that was silent playback waiting to happen: with the amp
+     * plugged in for MIDI, Android enumerates a USB audio device that cannot
+     * actually take audio in that mode, so the track was pushed into a sink
+     * that goes nowhere while the player happily reported "Играет".
+     */
     AUTO("Авто"),
     BLUETOOTH("Bluetooth"),
     USB("USB (комбик)"),
@@ -159,19 +168,27 @@ class JamPlayer(private val app: Context) {
             runCatching { p.setVolume(volume, volume) }
             applyRoute(p)
             if (startAtMs > 0) runCatching { p.seekTo(startAtMs) }
-            if (requestFocus()) {
-                runCatching { p.start() }
-                applySpeed(p) // only valid once started on some devices
-                isPlaying = true
+            // Ask for focus, but start either way. A refusal is rare, and
+            // silently declining to play is a worse answer than playing over
+            // whatever else claimed the audio.
+            if (!requestFocus()) {
+                onLog?.invoke("Джем: аудиофокус не выдан, играю всё равно")
+            }
+            val started = runCatching { p.start() }
+            applySpeed(p) // only valid once started on some devices
+            // Trust the player, not our intent: never claim "Играет" when it
+            // is not, which is how a silent failure looked like a working one.
+            isPlaying = runCatching { p.isPlaying }.getOrDefault(false)
+            refreshRouteLabel()
+            if (isPlaying) {
                 waitingForRoute = false
-                refreshRouteLabel()
                 status = "Играет: $name · $routeLabel"
                 onLog?.invoke("Джем: играет «$name» → $routeLabel")
-                JamService.sync(app, this)
             } else {
-                isPlaying = false
-                status = "Звук занят другим приложением — попробуй ещё раз"
+                status = "Не удалось запустить: ${started.exceptionOrNull()?.message ?: "плеер не начал играть"}"
+                onLog?.invoke("Джем: старт не удался «$name» — ${started.exceptionOrNull()}")
             }
+            JamService.sync(app, this)
         }
         mp.setOnCompletionListener {
             if (!looping) {
@@ -229,14 +246,14 @@ class JamPlayer(private val app: Context) {
                 isPlaying = false
                 status = "Пауза"
             } else {
-                if (requestFocus()) {
-                    mp.start()
-                    isPlaying = true
-                    pausedByRouteLoss = false
-                    pausedByFocusLoss = false
-                    waitingForRoute = false
-                    status = "Играет: $trackName · $routeLabel"
-                }
+                requestFocus()
+                mp.start()
+                isPlaying = mp.isPlaying
+                pausedByRouteLoss = false
+                pausedByFocusLoss = false
+                waitingForRoute = false
+                status = if (isPlaying) "Играет: $trackName · $routeLabel"
+                else "Плеер не начал играть — нажми ещё раз"
             }
         }.onFailure { status = "Плеер не в том состоянии — нажми ещё раз" }
         JamService.sync(app, this)
@@ -322,29 +339,52 @@ class JamPlayer(private val app: Context) {
         return when (o) {
             JamOutput.BLUETOOTH -> bt
             JamOutput.USB -> usb
-            // Auto: the amp's own Bluetooth first — that is how a Gen 3 plays a
-            // backing track through its speaker — then USB audio, then nothing
-            // (let Android use the phone).
-            JamOutput.AUTO -> bt ?: usb
-            JamOutput.PHONE -> null
+            // Auto and Телефон both mean "do not override the system route".
+            JamOutput.AUTO, JamOutput.PHONE -> null
         }
     }
 
     private fun applyRoute(mp: MediaPlayer) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val target = if (output == JamOutput.PHONE) null else pick(output)
-        runCatching { mp.setPreferredDevice(target) }
+        // null = whatever Android would do on its own, which is the right
+        // answer unless the user asked for a specific device.
+        val target = pick(output)
+        val ok = runCatching { mp.setPreferredDevice(target) }
+        if (ok.isFailure && target != null) {
+            // A device that refuses to be preferred must not take the track
+            // down with it — fall back to the system route.
+            onLog?.invoke("Джем: выход ${output.label} не принял звук, играю через систему")
+            runCatching { mp.setPreferredDevice(null) }
+        }
     }
 
     private fun refreshRouteLabel() {
         val chosen = pick(output)
         routeLabel = when {
-            output == JamOutput.PHONE -> "телефон"
             chosen != null -> "${kindName(chosen.type)} · ${deviceName(chosen)}"
             output == JamOutput.BLUETOOTH -> "Bluetooth не подключён"
             output == JamOutput.USB -> "USB-аудио не видно"
-            else -> "телефон (Bluetooth/USB не подключены)"
+            output == JamOutput.PHONE -> "телефон"
+            // Auto hands routing to Android, so name what it is actually using.
+            else -> {
+                val system = systemRoute()
+                if (system != null) "как в системе · $system" else "как в системе"
+            }
         }
+    }
+
+    /** What Android is currently using for media, for the "Авто" label. */
+    private fun systemRoute(): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        val outs = runCatching { audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS) }
+            .getOrDefault(emptyArray<AudioDeviceInfo>())
+        val preferred = outs.firstOrNull { isBluetooth(it.type) }
+            ?: outs.firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
+            }
+            ?: outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+        return preferred?.let { "${kindName(it.type)} · ${deviceName(it)}" }
     }
 
     private fun deviceName(d: AudioDeviceInfo): String =
@@ -402,7 +442,8 @@ class JamPlayer(private val app: Context) {
                 player?.let { applyRoute(it) }
                 // Nothing left to play into that the user asked for: hold the
                 // track rather than dumping it out of the phone speaker.
-                if (isPlaying && output != JamOutput.PHONE && pick(output) == null) {
+                val demanded = output == JamOutput.BLUETOOTH || output == JamOutput.USB
+                if (isPlaying && demanded && pick(output) == null) {
                     runCatching { player?.pause() }
                     isPlaying = false
                     pausedByRouteLoss = true

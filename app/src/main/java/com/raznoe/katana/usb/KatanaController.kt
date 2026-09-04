@@ -210,6 +210,18 @@ class KatanaController(private val connection: UsbMidiConnection) {
         }
     }
 
+    /**
+     * Write a block of bytes straight back to [address].
+     *
+     * Used to replay a raw tone captured from the amp. Goes through the sender
+     * queue with the preset pace so a whole capture cannot overrun the amp's
+     * MIDI buffer.
+     */
+    fun writeBlock(address: IntArray, data: IntArray) {
+        if (address.size != 4 || data.isEmpty()) return
+        enqueue(KatanaSysEx.buildSet(address, data), settleMs = PRESET_SETTLE_MS)
+    }
+
     fun readBlock(address: IntArray, size: Int) {
         enqueue(KatanaSysEx.buildQuery(address, size), settleMs = 30)
     }

@@ -23,6 +23,8 @@ import com.raznoe.katana.model.FactoryPresets
 import com.raznoe.katana.model.MusicLibrary
 import com.raznoe.katana.model.Patch
 import com.raznoe.katana.model.PatchStore
+import com.raznoe.katana.model.RawPatch
+import com.raznoe.katana.model.RawPatchStore
 import com.raznoe.katana.model.Track
 import com.raznoe.katana.model.TrackStore
 import com.raznoe.katana.model.Tracks
@@ -62,6 +64,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     private val usbManager = app.getSystemService(Context.USB_SERVICE) as UsbManager
     private val patchStore = PatchStore(app)
     private val trackStore = TrackStore(app)
+    private val rawStore = RawPatchStore(app)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var connection: UsbMidiConnection? = null
@@ -172,6 +175,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
         refreshDevices()
         refreshPatches()
+        refreshRawPatches()
         pickedTracks.addAll(trackStore.list().filterNot { it.fromLibrary })
         rebuildTrackList()
         jam.onLog = { line -> logAction("", line) }
@@ -647,6 +651,94 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         refreshPatches()
     }
 
+    // --- Raw tones captured from the amp ---------------------------------
+    // The one way to get a tone back exactly as it sounded without knowing
+    // what each address means: read the amp's live area, keep the bytes, write
+    // the same bytes to the same addresses later. Our labels for those bytes
+    // can be wrong and the recall is still faithful.
+    val rawPatches = mutableStateListOf<RawPatch>()
+    var capturing by mutableStateOf(false)
+        private set
+    var captureStatus by mutableStateOf("")
+        private set
+
+    private val captureRunnable = Runnable { finishCapture() }
+    private var captureName = ""
+
+    fun refreshRawPatches() {
+        rawPatches.clear()
+        rawPatches.addAll(rawStore.list())
+    }
+
+    /**
+     * Read the amp's live area and store it under [name].
+     *
+     * The read is a burst of requests whose replies arrive over the next
+     * second or two, so the capture is taken on a timer once they have landed.
+     */
+    fun captureFromAmp(name: String) {
+        val ctl = controller
+        if (ctl == null) {
+            captureStatus = "Нет связи с комбиком"
+            return
+        }
+        captureName = name.trim().ifBlank { "Тон с комбика" }
+        capturing = true
+        captureStatus = "Читаю комбик…"
+        blocks.clear()
+        ctl.readAll()
+        mainHandler.removeCallbacks(captureRunnable)
+        mainHandler.postDelayed(captureRunnable, CAPTURE_WAIT_MS)
+    }
+
+    private fun finishCapture() {
+        capturing = false
+        val live = RawPatch.liveAreaOnly(blocks.mapValues { it.value.toList() })
+        if (live.isEmpty()) {
+            captureStatus = "Комбик не ответил — проверь связь на вкладке «Патч» " +
+                "и профиль в «Диагностике»"
+            return
+        }
+        var name = captureName
+        var n = 2
+        while (rawPatches.any { it.name == name }) { name = "$captureName $n"; n++ }
+        val patch = RawPatch(
+            name = name,
+            blocks = live,
+            note = "Снято с комбика · ${live.size} блоков, ${live.values.sumOf { it.size }} байт",
+        )
+        rawStore.save(patch)
+        refreshRawPatches()
+        captureStatus = "Сохранено: «$name» (${patch.byteCount} байт)"
+        logAction("", "Снят тон с комбика: «$name», ${live.size} блоков")
+    }
+
+    /** Write a captured tone back, byte for byte. */
+    fun applyRawPatch(patch: RawPatch) {
+        val ctl = controller
+        if (ctl == null) {
+            captureStatus = "Нет связи с комбиком"
+            return
+        }
+        var sent = 0
+        for ((addrHex, bytes) in RawPatch.writeOrder(patch.blocks)) {
+            val addr = runCatching {
+                KatanaSysEx.fromHex(addrHex).map { it.toInt() and 0xFF }.toIntArray()
+            }.getOrNull() ?: continue
+            if (addr.size != 4) continue
+            ctl.writeBlock(addr, bytes.map { it and 0x7F }.toIntArray())
+            sent += bytes.size
+        }
+        activePreset = patch.name
+        captureStatus = "Отправлен тон «${patch.name}»: $sent байт"
+        logAction("", "Записан снятый тон «${patch.name}»: $sent байт")
+    }
+
+    fun deleteRawPatch(name: String) {
+        rawStore.delete(name)
+        refreshRawPatches()
+    }
+
     // --- Jam tracks -------------------------------------------------------
 
     /**
@@ -791,6 +883,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         // recreated (rotation, USB attach intent) must not cut the track off.
         mainHandler.removeCallbacks(reconnectRunnable)
         mainHandler.removeCallbacks(noResponseRunnable)
+        mainHandler.removeCallbacks(captureRunnable)
         autoReconnect = false
         teardown()
         super.onCleared()
@@ -802,5 +895,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         private const val NO_RESPONSE_MS = 6_000L
         private const val RECONNECT_STEP_MS = 1_500L
         private const val MAX_RECONNECT_ATTEMPTS = 5
+
+        /** How long to let the amp's replies land before taking a capture. */
+        private const val CAPTURE_WAIT_MS = 2_500L
     }
 }

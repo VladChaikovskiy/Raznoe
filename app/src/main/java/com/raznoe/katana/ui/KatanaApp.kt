@@ -1017,11 +1017,64 @@ private fun fmtTime(ms: Int): String {
 @Composable
 private fun LibraryScreen(vm: KatanaViewModel) {
     var name by remember { mutableStateOf("") }
+    var rawName by remember { mutableStateOf("") }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         DeviceTitle()
+
+        // This is the way to get a Librarian tone into the app exactly as it
+        // sounds. It stores the amp's own bytes rather than our reading of
+        // them, so recall is faithful even where our address labels are wrong.
+        Panel(accent = Nux.Gate) {
+            Text("Снять тон с комбика", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Настрой звук как надо — в Librarian или ручками на самом комбике — и нажми " +
+                    "«Снять». Приложение прочитает байты комбика как есть и потом вернёт их " +
+                    "точно такими же. Это работает, даже пока мы не знаем, что означает " +
+                    "каждый адрес, поэтому звук будет ровно тот.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            OutlinedTextField(
+                value = rawName,
+                onValueChange = { rawName = it },
+                label = { Text("название тона") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Pill(
+                if (vm.capturing) "Читаю комбик…" else "Снять тон с комбика",
+                selected = true,
+                accent = Nux.Gate,
+            ) {
+                if (!vm.capturing) {
+                    vm.captureFromAmp(rawName)
+                    rawName = ""
+                }
+            }
+            if (vm.captureStatus.isNotEmpty()) {
+                Text(vm.captureStatus, color = Nux.TextHi, fontSize = 11.sp)
+            }
+            if (vm.rawPatches.isEmpty()) {
+                Text("Снятых тонов пока нет.", color = Nux.TextLo, fontSize = 12.sp)
+            }
+            vm.rawPatches.forEach { rp ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(rp.name, color = Nux.TextHi, fontSize = 14.sp)
+                        Text(rp.note, color = Nux.TextLo, fontSize = 10.sp)
+                    }
+                    Pill("Вернуть", selected = false, accent = Nux.Gate) { vm.applyRawPatch(rp) }
+                    Box(Modifier.padding(start = 8.dp)) {
+                        Pill("✕", selected = false, accent = Nux.Amp) { vm.deleteRawPatch(rp.name) }
+                    }
+                }
+            }
+        }
+
         Panel {
             Text("Сохранить текущий тон", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(value = name, onValueChange = { name = it },
