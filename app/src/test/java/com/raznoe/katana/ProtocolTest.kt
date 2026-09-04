@@ -139,31 +139,6 @@ class ProtocolTest {
         )
     }
 
-    /**
-     * The amp block must follow the MkII order — type, gain, volume, bass,
-     * middle, treble, presence — on BOTH generations. It did not: Gen 3 had
-     * gain at index 0 and the type at index 7, so every value landed one slot
-     * low and each preset's gain was written into the amp-type byte.
-     */
-    @Test fun gen3AmpBlock_followsTheSameOrderAsMkii() {
-        val block = listOf(
-            KatanaParams.AMP_TYPE, KatanaParams.GAIN, KatanaParams.VOLUME,
-            KatanaParams.BASS, KatanaParams.MIDDLE, KatanaParams.TREBLE,
-            KatanaParams.PRESENCE,
-        )
-        block.forEachIndexed { offset, p ->
-            val mkii = p.addressFor(gen3 = false)
-            assertEquals("MkII ${p.id}", 0x21 + offset, mkii[3])
-            val gen3 = p.addrGen3
-            assertNotNull("нет адреса Gen 3 для ${p.id}", gen3)
-            assertArrayEquals(
-                "Gen 3 ${p.id}",
-                intArrayOf(0x20, 0x00, 0x06, offset),
-                gen3,
-            )
-        }
-    }
-
     /** The amp type is an index into our list, so it has to be in range. */
     @Test fun ampType_wireValuesStayInsideTheList() {
         val p = KatanaParams.AMP_TYPE

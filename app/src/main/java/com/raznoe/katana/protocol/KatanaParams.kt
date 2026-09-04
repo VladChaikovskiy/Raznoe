@@ -3,17 +3,22 @@ package com.raznoe.katana.protocol
 /**
  * The Katana parameter map — the "device profile".
  *
- * Addresses below are the community-confirmed **Katana Gen1 / MkII (model id
- * 0x33)** map, cross-verified across snhirsch/katana-midi-bridge and the
- * katana-dev projects. The SysEx framing/checksum ([KatanaSysEx]) is identical
- * on every generation; the ADDRESS MAP is what changes between generations.
+ * The MkII/Gen1 addresses here are checked line by line against the reverse-
+ * engineered SysEx specification (see docs/katana-address-map.md for the exact
+ * citations). That check found the bug behind every tone complaint this app
+ * has had: the amp panel block starts at 00 00 04 20 with the amp TYPE first,
+ * and our map started at 04 21, so all seven amp parameters were written one
+ * slot high — our gain set Volume, our bass set Mid, our presence spilled into
+ * the Booster/Mod chain byte, and the real amp type was never written at all.
+ * The amp therefore kept whatever character it was physically on, no preset
+ * could change it, and the EQ knobs each moved their neighbour.
  *
- * ⚠️ GEN 3: the app targets a Gen 3 amp, whose address map is still being
- * reverse-engineered by the community and is NOT yet public. We therefore ship
- * the confirmed MkII map as the default profile. Values that are known to be
- * uncertain on Gen 3 (amp panel offsets, amp-type list) have verified = false
- * and show a "(?)" in the UI. Use the Console tab's block-read + diff to
- * confirm/adjust any address on real Gen 3 hardware — then edit this one file.
+ * The SysEx framing/checksum ([KatanaSysEx]) is identical on every generation;
+ * the ADDRESS MAP is what changes. Gen 3 addresses are decoded from the Katana
+ * Librarian app and follow the same in-block ordering as MkII. Parameters not
+ * confirmed for Gen 3 have verified = false and show "(?)" in the UI; the
+ * Диагностика tab's block-read + diff confirms any one of them on real
+ * hardware, and then this one file is what changes.
  */
 
 enum class ParamKind { CONTINUOUS, TOGGLE, ENUM }
@@ -76,9 +81,18 @@ object KatanaParams {
 
     // ---- Enum / type lists (label -> wire value) -------------------------
 
-    // Gen 3 amp characters (front-panel). Address/order provisional for Gen 3.
+    /**
+     * The amp characters, with the wire codes the amp actually implements:
+     * Acoustic 0, Clean 1, Crunch 2, Lead 3, Brown 4 (katana_sysex.txt §Front
+     * Panel, "Amp Type").
+     *
+     * This list used to carry a sixth entry, "Pushed", at index 2 — a type the
+     * amp does not have. Everything after it was therefore off by one (our
+     * Crunch selected Lead, our Lead selected Brown) and our Brown, 5, was out
+     * of range entirely.
+     */
     val AMP_TYPES = listOf(
-        "Acoustic", "Clean", "Pushed", "Crunch", "Lead", "Brown",
+        "Acoustic", "Clean", "Crunch", "Lead", "Brown",
     )
 
     // Booster / OD-DS types (60 00 00 31). Note: wire value 7 is unused.
@@ -135,6 +149,15 @@ object KatanaParams {
     const val GEN3_SELECTOR_COUNT = 5
 
     // ---- Sections --------------------------------------------------------
+    // Documented Control Change numbers. The SysEx toggles for these blocks
+    // are range-specific ("you must know which of Boost or Mod is active"),
+    // and the spec itself says to prefer the CC, which switches whichever is
+    // effective at the time.
+    const val CC_BOOST_MOD = 16
+    const val CC_DELAY_FX = 17
+    const val CC_REVERB = 18
+    const val CC_LOOP = 19
+
     private const val AMP = "Усилитель"
     private const val BOOST = "Booster"
     private const val MOD = "Mod"
@@ -173,14 +196,14 @@ object KatanaParams {
     // Now aligned to the MkII order. To confirm on hardware: Диагностика →
     // Снимок → turn the amp's own Gain knob → Прочитать → Сравнить. Gain must
     // report at 20 00 06 01.
-    val AMP_TYPE = enum("amp_type", "Тип усилителя", AMP, a(0x00, 0x00, 0x04, 0x21),
+    val AMP_TYPE = enum("amp_type", "Тип усилителя", AMP, a(0x00, 0x00, 0x04, 0x20),
         AMP_TYPES.mapIndexed { i, s -> s to i }, g3 = a(0x20, 0x00, 0x06, 0x00))
-    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x22), g3 = a(0x20, 0x00, 0x06, 0x01))
-    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x23), g3 = a(0x20, 0x00, 0x06, 0x02))
-    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x24), g3 = a(0x20, 0x00, 0x06, 0x03))
-    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x25), g3 = a(0x20, 0x00, 0x06, 0x04))
-    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x05))
-    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x27), g3 = a(0x20, 0x00, 0x06, 0x06))
+    val GAIN = cont("gain", "Gain", AMP, a(0x00, 0x00, 0x04, 0x21), g3 = a(0x20, 0x00, 0x06, 0x01))
+    val VOLUME = cont("volume", "Volume", AMP, a(0x00, 0x00, 0x04, 0x22), g3 = a(0x20, 0x00, 0x06, 0x02))
+    val BASS = cont("bass", "Bass", AMP, a(0x00, 0x00, 0x04, 0x23), g3 = a(0x20, 0x00, 0x06, 0x03))
+    val MIDDLE = cont("middle", "Middle", AMP, a(0x00, 0x00, 0x04, 0x24), g3 = a(0x20, 0x00, 0x06, 0x04))
+    val TREBLE = cont("treble", "Treble", AMP, a(0x00, 0x00, 0x04, 0x25), g3 = a(0x20, 0x00, 0x06, 0x05))
+    val PRESENCE = cont("presence", "Presence", AMP, a(0x00, 0x00, 0x04, 0x26), g3 = a(0x20, 0x00, 0x06, 0x06))
 
     // ---- Booster (60 00 00 30); Gen 3 on/off in section SW ---------------
     val BOOST_SW = toggle("boost_sw", "Booster", BOOST, a(0x60, 0x00, 0x00, 0x30),
@@ -228,8 +251,9 @@ object KatanaParams {
         slots = DELAY_SLOTS, gi = 5, sel = SEL_FX2A)
     val DELAY_HIGHCUT = enum("delay_hc", "High Cut", DLY, a(0x60, 0x00, 0x05, 0x65),
         HIGH_CUT.mapIndexed { i, s -> s to i }, slots = DELAY_SLOTS, gi = 6, sel = SEL_FX2A)
+    // Delay's Effect Level runs to 120, not 100 (doc: 00 .. 78).
     val DELAY_LEVEL = cont("delay_level", "Effect Level", DLY, a(0x60, 0x00, 0x05, 0x66),
-        slots = DELAY_SLOTS, gi = 7, sel = SEL_FX2A)
+        max = 120, slots = DELAY_SLOTS, gi = 7, sel = SEL_FX2A)
     val DELAY_DIRECT = cont("delay_direct", "Direct Mix", DLY, a(0x60, 0x00, 0x05, 0x67),
         slots = DELAY_SLOTS, gi = 8, sel = SEL_FX2A)
 
@@ -249,7 +273,8 @@ object KatanaParams {
         LOW_CUT.mapIndexed { i, s -> s to i }, slots = REVERB_SLOTS, gi = 7, sel = SEL_FX3)
     val REVERB_HIGHCUT = enum("reverb_hc", "High Cut", REV, a(0x60, 0x00, 0x06, 0x16),
         HIGH_CUT.mapIndexed { i, s -> s to i }, slots = REVERB_SLOTS, gi = 8, sel = SEL_FX3)
-    val REVERB_DENSITY = cont("reverb_density", "Density", REV, a(0x60, 0x00, 0x06, 0x17))
+    // Density is 0..10, not 0..100 (doc: 00 .. 0A).
+    val REVERB_DENSITY = cont("reverb_density", "Density", REV, a(0x60, 0x00, 0x06, 0x17), max = 10)
     val REVERB_LEVEL = cont("reverb_level", "Effect Level", REV, a(0x60, 0x00, 0x06, 0x18),
         slots = REVERB_SLOTS, gi = 10, sel = SEL_FX3)
     val REVERB_DIRECT = cont("reverb_direct", "Direct Mix", REV, a(0x60, 0x00, 0x06, 0x19),
@@ -288,6 +313,23 @@ object KatanaParams {
     val CURRENT_PRESET_ADDR = a(0x00, 0x01, 0x00, 0x00)
     /** Data byte per channel: Panel=0, CH1..CH4 = 1..4. */
     val CHANNELS = listOf("Panel" to 0, "CH1" to 1, "CH2" to 2, "CH3" to 3, "CH4" to 4)
+
+    /**
+     * Block on/off by Control Change instead of by address.
+     *
+     * BOOST/MOD is one physical DSP knob with two ranges, and so is DELAY/FX,
+     * which is why the spec's SysEx toggles are range-specific: "you must know
+     * which of Boost or Mod is active to use sysex for this. Probably simpler
+     * to use CC# 16, since that will toggle whatever is effective at the time."
+     * The CC works whichever range the knob is on, so it is what we lead with.
+     */
+    val TOGGLE_CC: Map<String, Int> = mapOf(
+        "boost_sw" to CC_BOOST_MOD,
+        "mod_sw" to CC_BOOST_MOD,
+        "delay_sw" to CC_DELAY_FX,
+        "fx_sw" to CC_DELAY_FX,
+        "reverb_sw" to CC_REVERB,
+    )
 
     // ---- Live-patch read spans (RQ1 these to snapshot current tone) ------
     data class ReadRange(val address: IntArray, val size: Int)
@@ -335,7 +377,10 @@ object KatanaParams {
 
 
     val READ_RANGES = listOf(
-        ReadRange(a(0x00, 0x00, 0x04, 0x20), 0x0A),   // amp panel
+        // The doc names this as THE block to snapshot and restore for a
+        // "virtual preset": address 00 00 04 00, count 00 00 00 2A. It covers
+        // send/return, the DSP knob colours and the whole amp panel.
+        ReadRange(a(0x00, 0x00, 0x04, 0x00), 0x2A),   // amp common + panel
         ReadRange(a(0x60, 0x00, 0x00, 0x30), 0x0A),   // booster
         ReadRange(a(0x60, 0x00, 0x01, 0x40), 0x02),   // mod header
         ReadRange(a(0x60, 0x00, 0x03, 0x4C), 0x02),   // fx header
@@ -379,7 +424,7 @@ object KatanaParams {
         // Reverb: off, dry fully through, filters flat (14 = Flat high cut,
         // 0 = Flat low cut).
         "reverb_sw" to 0, "reverb_type" to 1, "reverb_time" to 40, "reverb_pre" to 0,
-        "reverb_lc" to 0, "reverb_hc" to 14, "reverb_density" to 50,
+        "reverb_lc" to 0, "reverb_hc" to 14, "reverb_density" to 5,
         "reverb_level" to 35, "reverb_direct" to 100, "reverb_spring" to 50,
         // Noise suppressor: OFF by default. A gate is only wanted on a
         // distorted tone (see FactoryPresets.gate); forcing one onto a clean

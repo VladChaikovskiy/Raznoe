@@ -212,7 +212,9 @@ class PresetTest {
         // The imported demos keep their voicing — EQ and effect choices are the
         // original ones, only the noise floor and loudness are normalised.
         val gm = FactoryPresets.ORIGINALS.first { it.name.contains("GMoore Solo") }
-        assertEquals(4, gm.values["amp_type"])
+        // Lead, which is wire code 3 — it read 4 while the list carried a
+        // sixth, non-existent "Pushed" entry at index 2.
+        assertEquals(3, gm.values["amp_type"])
         assertEquals(75, gm.values["middle"])
     }
 

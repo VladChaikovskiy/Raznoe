@@ -148,6 +148,28 @@ class KatanaController(private val connection: UsbMidiConnection) {
     fun setParam(param: KatanaParam, value: Int) {
         val data = encode(param, value)
         for (addr in addressesFor(param)) enqueueParam(addr, data)
+        sendToggleCc(param, value)
+    }
+
+    /**
+     * Back a block's on/off up with its documented Control Change.
+     *
+     * BOOST/MOD is a single DSP knob with two ranges, as is DELAY/FX, so the
+     * SysEx toggle only bites when the matching range is the active one — the
+     * spec says as much and points at the CC instead. Sending the CC after the
+     * address write means the switch lands whichever range the amp is on.
+     * BOSS gear reads a CC under 64 as off and 64 or over as on.
+     */
+    private fun sendToggleCc(param: KatanaParam, value: Int) {
+        if (param.kind != ParamKind.TOGGLE) return
+        val cc = KatanaParams.TOGGLE_CC[param.id] ?: return
+        val ccValue = if (value != 0) 127 else 0
+        enqueueRaw(
+            UsbMidiPacketizer.encodeControlChange(0, cc, ccValue),
+            settleMs = 8,
+        ) {
+            onTraffic?.invoke("TX", byteArrayOf(0xB0.toByte(), cc.toByte(), ccValue.toByte()))
+        }
     }
 
     /**
@@ -189,9 +211,23 @@ class KatanaController(private val connection: UsbMidiConnection) {
         }.onFailure { onDone?.invoke(0, frames.size) }
     }
 
-    /** Select Panel/CH1..CH4 via the documented SysEx address. */
+    /**
+     * Select Panel/CH1..CH4.
+     *
+     * The documented payload for the recall address is TWO bytes, `00 <ch>`;
+     * we were sending one, so the amp took our channel number as the first
+     * half of a value it never got the rest of. The spec also notes that a
+     * Program Change is "probably much simpler", so we send both — same
+     * destination either way, and the PC works even if the address is wrong
+     * for this generation.
+     */
     fun selectChannel(dataByte: Int) {
-        enqueue(KatanaSysEx.buildSet(KatanaParams.CURRENT_PRESET_ADDR, dataByte), settleMs = 20)
+        val ch = dataByte and 0x7F
+        enqueue(
+            KatanaSysEx.buildSet(KatanaParams.CURRENT_PRESET_ADDR, intArrayOf(0x00, ch)),
+            settleMs = 20,
+        )
+        selectProgram(ch)
         readAll() // reflect the recalled tone in the UI
     }
 

@@ -8,13 +8,15 @@ import com.raznoe.katana.protocol.ParamKind
  * Built-in presets, two groups:
  *  • ORIGINALS (★) — REAL demo patches decoded from the Katana Librarian's
  *    bundled .kat files (BOSS demos + JuCaNeRy "JNs" set). Exact gain/EQ/level/
- *    effect values; amp TYPE is mapped from the MkII code to the nearest Gen 3
- *    amp model. These are the genuine tones, not re-creations.
+ *    effect values. These are the genuine tones, not re-creations.
  *  • My own re-creations — starting-point tones I voiced (noise-gated, loudness
  *    leveled). Marked "Моя версия" in their note.
  *
  * Values reference [KatanaParams] ids and use the community MkII wire values.
- * Amp type indices: 0 Acoustic, 1 Clean, 2 Pushed, 3 Crunch, 4 Lead, 5 Brown.
+ * Amp type codes: 0 Acoustic, 1 Clean, 2 Crunch, 3 Lead, 4 Brown — the five the
+ * amp implements. The list used to carry a sixth, "Pushed", at index 2, so every
+ * preset from Crunch upward selected the wrong character; the values here were
+ * remapped when that was found.
  *
  * EVERY preset here goes through [finish], which guarantees three things that
  * the earlier hand-written maps did not:
@@ -159,7 +161,7 @@ object FactoryPresets {
         val drive = if (boosted) v["boost_drive"] ?: 0 else 0
         val heat = when (v["amp_type"] ?: AMP_CLEAN) {
             AMP_LEAD, AMP_BROWN -> 2
-            AMP_PUSHED, AMP_CRUNCH -> 1
+            AMP_CRUNCH -> 1
             else -> 0 // Acoustic, Clean — nothing to gate
         } + if (drive >= HARD_DRIVE) 1 else 0
 
@@ -223,13 +225,12 @@ object FactoryPresets {
 
     private const val N = "Моя версия (не оригинал JNs)"
 
-    // Amp characters, in the order [KatanaParams.AMP_TYPES] lists them.
+    // The amp's own wire codes for its five characters, per the SysEx spec.
     private const val AMP_ACOUSTIC = 0
     private const val AMP_CLEAN = 1
-    private const val AMP_PUSHED = 2
-    private const val AMP_CRUNCH = 3
-    private const val AMP_LEAD = 4
-    private const val AMP_BROWN = 5
+    private const val AMP_CRUNCH = 2
+    private const val AMP_LEAD = 3
+    private const val AMP_BROWN = 4
 
     /** Booster drive from which the pedal itself starts adding hiss. */
     private const val HARD_DRIVE = 30
@@ -261,7 +262,7 @@ object FactoryPresets {
 
     val ORIGINALS: List<Patch> = listOf(
         orig("★ GMoore Solo", mapOf(
-            "amp_type" to 4,
+            "amp_type" to 3,
             "gain" to 76,
             "volume" to 60,
             "bass" to 60,
@@ -341,7 +342,7 @@ object FactoryPresets {
             "ns_rel" to 40,
         )),
         orig("★ ACDC", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 65,
             "volume" to 21,
             "bass" to 30,
@@ -381,7 +382,7 @@ object FactoryPresets {
             "ns_rel" to 50,
         )),
         orig("★ Pink Floyd", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 20,
             "volume" to 100,
             "bass" to 30,
@@ -421,7 +422,7 @@ object FactoryPresets {
             "ns_rel" to 50,
         )),
         orig("★ Fusion Lead", mapOf(
-            "amp_type" to 4,
+            "amp_type" to 3,
             "gain" to 80,
             "volume" to 47,
             "bass" to 40,
@@ -461,7 +462,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ FusionCrunch", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 50,
             "volume" to 61,
             "bass" to 40,
@@ -501,7 +502,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Green Day", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 68,
             "volume" to 71,
             "bass" to 44,
@@ -541,7 +542,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Hardwire", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 55,
             "volume" to 24,
             "bass" to 65,
@@ -581,7 +582,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Metal Rhythm", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 71,
             "volume" to 46,
             "bass" to 65,
@@ -621,7 +622,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Metal Solo", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 71,
             "volume" to 54,
             "bass" to 51,
@@ -661,7 +662,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Octa Fuzz", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 35,
             "volume" to 29,
             "bass" to 60,
@@ -741,7 +742,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Soft Lead", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 20,
             "volume" to 32,
             "bass" to 42,
@@ -781,7 +782,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Sweet Strat", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 74,
             "volume" to 19,
             "bass" to 13,
@@ -821,7 +822,7 @@ object FactoryPresets {
             "ns_rel" to 0,
         )),
         orig("★ Tele Edge", mapOf(
-            "amp_type" to 3,
+            "amp_type" to 2,
             "gain" to 27,
             "volume" to 30,
             "bass" to 49,
@@ -941,7 +942,7 @@ object FactoryPresets {
             "ns_rel" to 50,
         )),
         orig("★ Katana Demo 2", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 93,
             "volume" to 24,
             "bass" to 68,
@@ -981,7 +982,7 @@ object FactoryPresets {
             "ns_rel" to 50,
         )),
         orig("★ Katana Demo 3", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 40,
             "volume" to 20,
             "bass" to 74,
@@ -1021,7 +1022,7 @@ object FactoryPresets {
             "ns_rel" to 50,
         )),
         orig("★ Katana Demo 4", mapOf(
-            "amp_type" to 5,
+            "amp_type" to 4,
             "gain" to 51,
             "volume" to 21,
             "bass" to 91,
@@ -1064,53 +1065,53 @@ object FactoryPresets {
 
     val ALL: List<Patch> = ORIGINALS + listOf(
         preset("AC/DC Crunch", "$N · плотный Marshall-кранч, минимум эффектов") {
-            amp(3, 62, 52, 68, 58, 55); reverb(1, level = 22, time = 35)
+            amp(2, 62, 52, 68, 58, 55); reverb(1, level = 22, time = 35)
         },
         preset("Fusion Lead", "$N · певучий лид с дилеем и холлом") {
-            amp(4, 78, 45, 60, 55, 52); boost(12, 40, 60)
+            amp(3, 78, 45, 60, 55, 52); boost(12, 40, 60)
             delay(0, 440, 35); reverb(3, 35)
         },
         preset("Fusion Crunch", "$N · упругий кранч для риффов и аккордов") {
-            amp(3, 55, 50, 58, 55, 48); delay(0, 380, 22, 28); reverb(1, 22)
+            amp(2, 55, 50, 58, 55, 48); delay(0, 380, 22, 28); reverb(1, 22)
         },
         preset("Gary Moore Clean", "$N · тёплый чистый с холлом и хорусом") {
             amp(1, 30, 55, 55, 55, 45); mod(29); reverb(3, level = 45, time = 60)
         },
         preset("Gary Moore Solo", "$N · жирный поющий лид") {
-            amp(4, 82, 50, 70, 55, 50); boost(12, 45, 65)
+            amp(3, 82, 50, 70, 55, 50); boost(12, 45, 65)
             delay(7, 400, 40, 40); reverb(3, 38)
         },
         preset("Green Day Punk", "$N · яркий панк-кранч с бустом") {
-            amp(3, 72, 55, 60, 62, 60); boost(3, 50, 60); ns(35)
+            amp(2, 72, 55, 60, 62, 60); boost(3, 50, 60); ns(35)
         },
         preset("Hardwire Metal", "$N · плотный современный хай-гейн") {
-            amp(5, 85, 60, 40, 60, 55); ns(42); reverb(1, 15)
+            amp(4, 85, 60, 40, 60, 55); ns(42); reverb(1, 15)
         },
         preset("Metal Rhythm", "$N · тугой ритм со скупыми серединами") {
-            amp(5, 88, 62, 35, 58, 55); ns(45)
+            amp(4, 88, 62, 35, 58, 55); ns(45)
         },
         preset("Metal Solo", "$N · хай-гейн лид с дилеем") {
-            amp(5, 88, 55, 55, 62, 58); boost(0, 40, 60)
+            amp(4, 88, 55, 55, 62, 58); boost(0, 40, 60)
             delay(0, 400, 30, 35); reverb(3, 30); ns(40)
         },
         preset("Octave Fuzz", "$N · фузз с октавой сверху") {
-            amp(3, 55, 55, 55, 55, 50); boost(19, 70, 55); fx(14); reverb(1, 20)
+            amp(2, 55, 55, 55, 55, 50); boost(19, 70, 55); fx(14); reverb(1, 20)
         },
         preset("Pink Floyd Lead", "$N · gilmour-style: овердрайв + большой дилей") {
-            amp(4, 70, 50, 60, 52, 48); boost(10, 45, 60)
+            amp(3, 70, 50, 60, 52, 48); boost(10, 45, 60)
             delay(0, 440, 38, 45); reverb(3, 40)
         },
         preset("S-H Jazz", "$N · чистый джаз в духе JC-120 с хорусом") {
             amp(1, 20, 55, 50, 45, 40); mod(29); reverb(1, 30)
         },
         preset("Soft Lead", "$N · мягкий лид средней перегрузки") {
-            amp(4, 60, 48, 58, 52, 48); delay(0, 380, 30, 40); reverb(3, 40)
+            amp(3, 60, 48, 58, 52, 48); delay(0, 380, 30, 40); reverb(3, 40)
         },
         preset("Sweet Strat", "$N · чистый спанк со стратокастера, хорус") {
             amp(1, 35, 50, 52, 58, 50); mod(29); reverb(5, 30)
         },
         preset("Blues Drive", "$N · тёплый овердрайв для блюза") {
-            amp(3, 55, 52, 62, 55, 50); boost(10, 45, 60); reverb(1, 25)
+            amp(2, 55, 52, 62, 55, 50); boost(10, 45, 60); reverb(1, 25)
         },
         preset("Funk Clean", "$N · чистый фанк, компрессор + лёгкий хорус") {
             amp(1, 28, 50, 55, 60, 48); fx(3); mod(29); reverb(1, 18)
@@ -1119,23 +1120,23 @@ object FactoryPresets {
             amp(1, 30, 52, 50, 55, 45); delay(0, 600, 45, 50); reverb(3, level = 55, time = 80)
         },
         preset("Djent Tight", "$N · тугой современный хай-гейн, ноуз-гейт") {
-            amp(5, 90, 60, 42, 62, 52); ns(45)
+            amp(4, 90, 60, 42, 62, 52); ns(45)
         },
         preset("Country Twang", "$N · яркий кантри-твэнг, спринг-ревер") {
             amp(1, 30, 48, 55, 65, 55); boost(2, 30, 55); reverb(5, 28)
         },
         preset("Doom Sludge", "$N · низкий тяжёлый фузз") {
-            amp(5, 85, 70, 45, 45, 45); boost(20, 65, 55); ns(40)
+            amp(4, 85, 70, 45, 45, 45); boost(20, 65, 55); ns(40)
         },
         preset("Shred Lead", "$N · скоростной лид с дилеем и холлом") {
-            amp(5, 88, 52, 60, 60, 55); boost(12, 45, 62)
+            amp(4, 88, 52, 60, 60, 55); boost(12, 45, 62)
             delay(0, 380, 30, 38); reverb(3, 35); ns(38)
         },
         preset("Surf Twang", "$N · сёрф: спринг-ревер по максимуму, тремоло") {
             amp(1, 25, 52, 52, 60, 52); mod(21); reverb(5, level = 60, time = 55)
         },
         preset("Nu-Metal Scoop", "$N · выскобленные серединки, буст, гейт") {
-            amp(5, 86, 65, 30, 62, 55); boost(3, 55, 60); ns(45)
+            amp(4, 86, 65, 30, 62, 55); boost(3, 55, 60); ns(45)
         },
         preset("Worship Pad", "$N · воздушный чистый лид, дилей+ревер") {
             amp(1, 40, 50, 55, 55, 48); boost(1, 25, 55)
@@ -1143,41 +1144,41 @@ object FactoryPresets {
         },
         // --- Singing / blues leads (в духе Gary Moore Solo) ---------------
         preset("Sing Lead", "$N · поющий лид с сустейном, длинный дилей + холл") {
-            amp(4, 80, 48, 72, 55, 52); boost(12, 48, 68, tone = 55)
+            amp(3, 80, 48, 72, 55, 52); boost(12, 48, 68, tone = 55)
             delay(7, 440, 42, 42); reverb(3, level = 42, time = 55)
         },
         preset("Moore Blues", "$N · тёплый блюз-лид, поёт на низкой громкости") {
-            amp(4, 72, 52, 70, 52, 48); boost(10, 45, 62)
+            amp(3, 72, 52, 70, 52, 48); boost(10, 45, 62)
             delay(7, 380, 35, 34); reverb(3, level = 34, time = 45)
         },
         preset("Still Got Blues", "$N · мягкий скрипичный лид, много холла") {
-            amp(4, 76, 50, 74, 50, 46); boost(12, 42, 64, tone = 48)
+            amp(3, 76, 50, 74, 50, 46); boost(12, 42, 64, tone = 48)
             delay(0, 420, 30, 36); reverb(3, level = 45, time = 60)
         },
         preset("SRV Texas", "$N · техасский овердрайв, tube screamer, пружина") {
             amp(2, 60, 55, 68, 60, 52); boost(12, 55, 60); reverb(5, level = 26, time = 40)
         },
         preset("Santana Sustain", "$N · бесконечный сустейн, длинный дилей + холл") {
-            amp(4, 84, 50, 76, 52, 50); boost(0, 40, 66)
+            amp(3, 84, 50, 76, 52, 50); boost(0, 40, 66)
             delay(7, 480, 45, 44); reverb(3, level = 48, time = 65)
         },
         preset("Slow Hand Lead", "$N · вудман-тон, средне-жирный лид") {
-            amp(4, 70, 48, 72, 50, 46); boost(11, 40, 60); reverb(3, level = 32, time = 45)
+            amp(3, 70, 48, 72, 50, 46); boost(11, 40, 60); reverb(3, level = 32, time = 45)
         },
         preset("Gilmour Big Lead", "$N · большой лид: овердрайв + длинный дилей + холл") {
-            amp(4, 74, 52, 66, 54, 50); boost(10, 46, 62)
+            amp(3, 74, 52, 66, 54, 50); boost(10, 46, 62)
             delay(0, 470, 40, 46); reverb(3, level = 44, time = 62)
         },
         preset("Slash Rock Lead", "$N · рок-лид, крепкий кранч с серединой") {
-            amp(5, 80, 55, 62, 58, 52); boost(3, 50, 60)
+            amp(4, 80, 55, 62, 58, 52); boost(3, 50, 60)
             delay(0, 400, 28, 32); reverb(1, level = 24, time = 35)
         },
         preset("Power Ballad", "$N · 80-е: хорус + большой дилей + холл") {
-            amp(4, 68, 50, 64, 56, 50); mod(29); boost(1, 30, 58)
+            amp(3, 68, 50, 64, 56, 50); mod(29); boost(1, 30, 58)
             delay(0, 450, 38, 44); reverb(3, level = 48, time = 65)
         },
         preset("Carlos Warm", "$N · тёплый поющий лид с мидбустом") {
-            amp(4, 78, 54, 74, 50, 48); boost(0, 45, 66, tone = 45)
+            amp(3, 78, 54, 74, 50, 48); boost(0, 45, 66, tone = 45)
             delay(7, 430, 40, 40); reverb(3, level = 40, time = 55)
         },
     )

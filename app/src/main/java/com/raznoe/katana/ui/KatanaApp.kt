@@ -362,10 +362,31 @@ private fun PresetsScreen(vm: KatanaViewModel) {
     ) {
         DeviceTitle()
         Text("Пресеты", color = Nux.TextHi, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        // The amp's own four channels are the one path to a Librarian tone that
+        // cannot be wrong: the tone lives in the amp, and a Program Change
+        // recalls it. No address map, no parameter values, nothing to get
+        // wrong on our side.
+        Panel(accent = Nux.Gate) {
+            Text("Каналы комбика", color = Nux.TextHi, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Это тоны, сохранённые в самом комбике. Разложи в Librarian нужные патчи " +
+                    "по CH1–CH4 — и здесь они переключаются один в один, без потерь: звук " +
+                    "берётся из комбика, приложение только просит его переключить.",
+                color = Nux.TextLo, fontSize = 11.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                KatanaParams.CHANNELS.forEachIndexed { i, (label, _) ->
+                    Pill(label, selected = vm.currentChannel == i, accent = Nux.Gate) {
+                        vm.selectChannel(i)
+                    }
+                }
+            }
+        }
+
         Text(
-            "★ — оригинальные демо-патчи BOSS/JuCaNeRy, остальные — мои версии. " +
-                "Жми «Загрузить», а если звук не тот — открой «▾ Подстроить» под пресетом " +
-                "и правь ручками прямо здесь: слышно сразу.",
+            "Ниже — пресеты приложения: ★ оригинальные демо-патчи BOSS/JuCaNeRy, " +
+                "остальные мои версии. Жми «Загрузить», а если звук не тот — открой " +
+                "«▾ Подстроить» под пресетом и правь ручками прямо здесь: слышно сразу.",
             color = Nux.TextLo, fontSize = 12.sp,
         )
         if (vm.presetStatus.isNotEmpty()) {
