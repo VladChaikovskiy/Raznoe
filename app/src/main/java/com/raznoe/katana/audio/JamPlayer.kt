@@ -117,6 +117,14 @@ class JamPlayer(private val app: Context) {
     private var retriedCurrent = false
     private var started = false
 
+    /**
+     * When playback last began. Another app holding audio focus can make the
+     * system hand us a focus LOSS within milliseconds of starting, and pausing
+     * on that looks exactly like "the track will not play". Losses inside this
+     * grace period are noted and ignored.
+     */
+    private var startedPlayingAt = 0L
+
     // --- lifecycle --------------------------------------------------------
 
     /** Start listening for route/focus changes. Idempotent. */
@@ -179,6 +187,7 @@ class JamPlayer(private val app: Context) {
             // Trust the player, not our intent: never claim "Играет" when it
             // is not, which is how a silent failure looked like a working one.
             isPlaying = runCatching { p.isPlaying }.getOrDefault(false)
+            startedPlayingAt = System.currentTimeMillis()
             refreshRouteLabel()
             if (isPlaying) {
                 waitingForRoute = false
@@ -233,11 +242,22 @@ class JamPlayer(private val app: Context) {
         }
     }
 
+    /**
+     * Called when the play button is pressed with nothing loaded, so the
+     * button always does something instead of reporting "pick a track".
+     */
+    var onPlayWithNothingLoaded: (() -> Unit)? = null
+
     fun togglePlayPause() = onMain {
         val mp = player
         if (mp == null) {
             val uri = trackUri
-            if (uri != null) openTrack(uri, trackName, positionMs) else status = "Выбери трек"
+            if (uri != null) {
+                openTrack(uri, trackName, positionMs)
+            } else {
+                status = "Выбираю первый трек…"
+                onPlayWithNothingLoaded?.invoke()
+            }
             return@onMain
         }
         runCatching {
@@ -478,14 +498,18 @@ class JamPlayer(private val app: Context) {
         onMain {
             when (change) {
                 AudioManager.AUDIOFOCUS_LOSS -> {
-                    runCatching { player?.pause() }
-                    isPlaying = false
-                    pausedByFocusLoss = false
-                    status = "Пауза: звук забрало другое приложение"
-                    JamService.sync(app, this)
+                    if (justStarted()) {
+                        onLog?.invoke("Джем: фокус отобрали сразу после старта — играю дальше")
+                    } else {
+                        runCatching { player?.pause() }
+                        isPlaying = false
+                        pausedByFocusLoss = false
+                        status = "Пауза: звук забрало другое приложение"
+                        JamService.sync(app, this)
+                    }
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    if (isPlaying) {
+                    if (isPlaying && !justStarted()) {
                         runCatching { player?.pause() }
                         isPlaying = false
                         pausedByFocusLoss = true
@@ -508,6 +532,10 @@ class JamPlayer(private val app: Context) {
             }
         }
     }
+
+    /** True within the grace period after playback began. */
+    private fun justStarted(): Boolean =
+        System.currentTimeMillis() - startedPlayingAt < FOCUS_GRACE_MS
 
     private fun requestFocus(): Boolean {
         val attrs = AudioAttributes.Builder()
@@ -567,6 +595,7 @@ class JamPlayer(private val app: Context) {
         const val TAG = "JamPlayer"
         const val RETRY_DELAY_MS = 400L
         const val RESUME_DELAY_MS = 700L
+        const val FOCUS_GRACE_MS = 1_500L
     }
 }
 

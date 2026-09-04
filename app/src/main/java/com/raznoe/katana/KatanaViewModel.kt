@@ -187,6 +187,9 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         pickedTracks.addAll(trackStore.list().filterNot { it.fromLibrary })
         rebuildTrackList()
         jam.onLog = { line -> logAction("", line) }
+        // Pressing play with nothing loaded starts the first track rather than
+        // asking the user to go and pick one.
+        jam.onPlayWithNothingLoaded = { tracks.firstOrNull()?.let { playTrack(it) } }
         lastCrash = KatanaApplication.lastCrash(app)
         // Pull the phone's music in straight away when access is already
         // granted, so the Jam tab is populated before it is even opened.
