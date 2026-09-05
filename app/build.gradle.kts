@@ -12,8 +12,26 @@ android {
         applicationId = "com.raznoe.katana"
         minSdk = 24
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.0.1"
+        versionCode = 12
+        versionName = "1.0.2"
+    }
+
+    // A debug keystore that lives in the repo instead of being generated on
+    // whatever machine builds. Gradle invents a random debug key when it does
+    // not find one, so every CI build was signed with a different certificate
+    // and Android refused to install one APK over the previous one
+    // ("Приложение не установлено") — the app had to be uninstalled, losing its
+    // saved patches and tracks, every single time. With a fixed key the APK
+    // just updates in place. Debug-only, so the well-known "android" password
+    // is exactly right; nothing here signs a release.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {

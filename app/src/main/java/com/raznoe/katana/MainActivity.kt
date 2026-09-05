@@ -23,7 +23,9 @@ import com.raznoe.katana.ui.KatanaTheme
 class MainActivity : ComponentActivity() {
 
     private val vm: KatanaViewModel by viewModels()
-    private lateinit var usbManager: UsbManager
+
+    /** Null when this phone gives us no USB service; see KatanaViewModel. */
+    private var usbManager: UsbManager? = null
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -40,12 +42,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        usbManager = runCatching { getSystemService(Context.USB_SERVICE) as? UsbManager }
+            .getOrNull()
 
-        val filter = IntentFilter(ACTION_USB_PERMISSION)
-        ContextCompat.registerReceiver(
-            this, permissionReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
+        // Everything before setContent has to be incapable of throwing: an
+        // exception here means the app does not open at all, with no screen to
+        // say why. Registering a receiver is not worth that.
+        runCatching {
+            ContextCompat.registerReceiver(
+                this, permissionReceiver, IntentFilter(ACTION_USB_PERMISSION),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
 
         setContent {
             KatanaTheme {
@@ -99,7 +107,8 @@ class MainActivity : ComponentActivity() {
 
     /** Ask for USB permission if needed, then connect. */
     private fun requestConnect(device: UsbDevice) {
-        if (usbManager.hasPermission(device)) {
+        val usb = usbManager ?: return
+        if (usb.hasPermission(device)) {
             vm.connect(device)
         } else {
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
@@ -107,7 +116,7 @@ class MainActivity : ComponentActivity() {
             val pi = PendingIntent.getBroadcast(
                 this, 0, Intent(ACTION_USB_PERMISSION).setPackage(packageName), flags,
             )
-            usbManager.requestPermission(device, pi)
+            usb.requestPermission(device, pi)
         }
     }
 

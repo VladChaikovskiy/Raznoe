@@ -138,6 +138,7 @@ private fun PatchScreen(vm: KatanaViewModel, onConnectRequest: (UsbDevice) -> Un
     ) {
         DeviceTitle()
         CrashBanner(vm)
+        StartupErrorBanner(vm)
         ConnectionStrip(vm, onConnectRequest)
 
         // Channels
@@ -246,6 +247,33 @@ private fun BlockEditor(vm: KatanaViewModel, block: Block) {
 }
 
 private fun mark(p: KatanaParam) = if (!p.verified) " (?)" else ""
+
+/**
+ * A startup step that failed without taking the app down with it.
+ *
+ * The app is usable with one of these showing — that is the whole point of
+ * them: a bad saved file or a refused media query costs its own feature, not
+ * the launch.
+ */
+@Composable
+private fun StartupErrorBanner(vm: KatanaViewModel) {
+    val error = vm.startupError ?: return
+    val clipboard = LocalClipboardManager.current
+    Panel(accent = Nux.Boost) {
+        Text("⚠ Часть запуска не сработала", color = Nux.Boost, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Приложение работает, но эти шаги пропущены. Пришли мне текст — починю.",
+            color = Nux.TextLo, fontSize = 11.sp,
+        )
+        Text(error, color = Nux.TextLo, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Pill("Скопировать", selected = true, accent = Nux.Boost) {
+                clipboard.setText(AnnotatedString(error))
+            }
+            Pill("Скрыть", selected = false, accent = Nux.Boost) { vm.dismissStartupError() }
+        }
+    }
+}
 
 /**
  * Shown once after the app has gone down, with the trace ready to copy. The

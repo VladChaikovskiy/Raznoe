@@ -19,6 +19,11 @@ app/release/
 # Keystores (do not commit signing material)
 *.jks
 *.keystore
+# ...except the debug key, which is not signing material: it is the
+# throwaway "android"/androiddebugkey pair, and it has to be the SAME one on
+# every machine or each build produces an APK that will not install over the
+# last one. Never add a release keystore here.
+!app/debug.keystore
 
 # OS
 .DS_Store

@@ -30,14 +30,17 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      # Cheap static checks that catch the mistakes an Android compile would,
-      # so a build is not spent on them: a property/function JVM signature
-      # clash (a `var foo` already owns setFoo), and a UI calling a model
-      # member that no longer exists.
+      # Cheap static checks for the mistakes that a green build does not catch:
+      # a property/function JVM signature clash (a `var foo` already owns
+      # setFoo), a UI calling a model member that no longer exists, and a
+      # property read before its initialiser has run — which compiles fine and
+      # then crashes the app before it draws a frame.
       - name: Static checks
         run: |
           python3 tools/check-jvm-clashes.py
           python3 tools/check-vm-api.py
+          python3 tools/check-init-order.py --self-test
+          python3 tools/check-init-order.py
 
       - name: Run unit tests
         run: gradle testDebugUnitTest --stacktrace --no-daemon

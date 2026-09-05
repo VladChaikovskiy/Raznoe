@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -69,7 +70,13 @@ val DIAG_BLOCKS = listOf(
 class KatanaViewModel(app: Application) : AndroidViewModel(app) {
 
     private val app = app
-    private val usbManager = app.getSystemService(Context.USB_SERVICE) as UsbManager
+    // Nullable on purpose. This is a property initialiser, so it runs before
+    // the init block and outside every guard there: a hard cast that failed
+    // here would take the app down before it drew a single frame, with no
+    // screen to explain why. And there is no reason to lose the app over it —
+    // without USB the backing-track half still works perfectly.
+    private val usbManager: UsbManager? =
+        runCatching { app.getSystemService(Context.USB_SERVICE) as? UsbManager }.getOrNull()
     private val patchStore = PatchStore(app)
     private val trackStore = TrackStore(app)
     private val rawStore = RawPatchStore(app)
@@ -110,6 +117,19 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     var lastCrash by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Startup steps that failed, if any.
+     *
+     * The app once would not open at all, and the reason was a single line of
+     * setup throwing inside the constructor. Nothing about reading a saved
+     * patch list or scanning the music library is worth losing the whole app
+     * over, so every startup step is now independent: one can fail, the rest
+     * still run, and what failed is shown on the Патч screen instead of taking
+     * the process down.
+     */
+    var startupError by mutableStateOf<String?>(null)
+        private set
+
     val devices = mutableStateListOf<DeviceInfo>()
     val paramValues = mutableStateMapOf<String, Int>()
     // Diagnostic logs: plain, capped, thread-safe — NOT Compose state. Nothing
@@ -118,12 +138,22 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     // the main thread now.
     private val log = ArrayDeque<String>()
     private val actionLog = ArrayDeque<String>()
+    private var lastActionKey = ""
     // TX/RX counters are hit on the USB threads for every packet; increment
     // lock-free and push to Compose state at most a few times/sec.
     private val txAtomic = AtomicInteger(0)
     private val rxAtomic = AtomicInteger(0)
     @Volatile private var countsPostScheduled = false
     val patches = mutableStateListOf<Patch>()
+
+    // Raw tones captured from the amp (see the capture section further down).
+    // Declared HERE, above the init block, and not next to the code that uses
+    // it: `init` calls refreshRawPatches(), and a property declared below the
+    // init block has not been assigned yet when that runs. This one was
+    // declared 500 lines lower, so every launch threw a NullPointerException
+    // inside the constructor and the app never drew a frame.
+    // tools/check-init-order.py now fails the build on that mistake.
+    val rawPatches = mutableStateListOf<RawPatch>()
 
     // --- Jam player state -------------------------------------------------
     /** What the Jam tab shows: the phone's library plus hand-picked files. */
@@ -180,26 +210,47 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     fun setKeyLock(on: Boolean) { lockHardwareKeys = on }
 
     init {
-        KatanaParams.ALL.forEach { paramValues[it.id] = it.default }
-        refreshDevices()
-        refreshPatches()
-        refreshRawPatches()
-        pickedTracks.addAll(trackStore.list().filterNot { it.fromLibrary })
-        rebuildTrackList()
-        jam.onLog = { line -> logAction("", line) }
-        // Pressing play with nothing loaded starts the first track rather than
-        // asking the user to go and pick one.
-        jam.onPlayWithNothingLoaded = { tracks.firstOrNull()?.let { playTrack(it) } }
-        lastCrash = KatanaApplication.lastCrash(app)
+        step("параметры") { KatanaParams.ALL.forEach { paramValues[it.id] = it.default } }
+        step("поиск комбика") { refreshDevices() }
+        step("сохранённые патчи") { refreshPatches() }
+        step("снятые тоны") { refreshRawPatches() }
+        step("список треков") {
+            pickedTracks.addAll(trackStore.list().filterNot { it.fromLibrary })
+            rebuildTrackList()
+        }
+        step("плеер") {
+            jam.onLog = { line -> logAction("", line) }
+            // Pressing play with nothing loaded starts the first track rather
+            // than asking the user to go and pick one.
+            jam.onPlayWithNothingLoaded = { tracks.firstOrNull()?.let { playTrack(it) } }
+        }
+        step("отчёт о падении") { lastCrash = KatanaApplication.lastCrash(app) }
         // Pull the phone's music in straight away when access is already
         // granted, so the Jam tab is populated before it is even opened.
-        scanLibrary(hasMusicPermission())
+        step("медиатека") { scanLibrary(hasMusicPermission()) }
+    }
+
+    /**
+     * Run one startup step, and keep going if it fails.
+     *
+     * See [startupError]. Nothing here is allowed to throw out of the
+     * constructor, because that is a crash before the first frame — the app
+     * simply does not open, with no screen to say why.
+     */
+    private fun step(name: String, body: () -> Unit) {
+        runCatching(body).onFailure { e ->
+            Log.e(TAG, "startup step '$name' failed", e)
+            val line = "$name — ${e.javaClass.simpleName}: ${e.message ?: "нет описания"}"
+            startupError = startupError?.let { "$it\n$line" } ?: line
+        }
     }
 
     fun hasMusicPermission(): Boolean = runCatching {
         ContextCompat.checkSelfPermission(app, MusicLibrary.permission()) ==
             PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
+
+    fun dismissStartupError() { startupError = null }
 
     fun dismissCrashReport() {
         KatanaApplication.clearCrash(app)
@@ -209,7 +260,8 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     // --- Device discovery / connection -----------------------------------
     fun refreshDevices() {
         devices.clear()
-        val found = runCatching { usbManager.deviceList.values.toList() }.getOrDefault(emptyList())
+        val found = runCatching { usbManager?.deviceList?.values?.toList() }
+            .getOrNull().orEmpty()
         found.filter { it.vendorId == ROLAND_VENDOR_ID }
             .forEach {
                 devices.add(
@@ -220,12 +272,14 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
                     ),
                 )
             }
-        if (devices.isEmpty() && !connected) {
+        if (usbManager == null) {
+            status = "Этот телефон не даёт приложению доступ к USB. Джем и пресеты-каналы работают."
+        } else if (devices.isEmpty() && !connected) {
             status = "Устройство Roland не найдено. Включи комбик, удерживая [BOOSTER], и подключи кабель."
         }
     }
 
-    fun hasPermission(device: UsbDevice): Boolean = usbManager.hasPermission(device)
+    fun hasPermission(device: UsbDevice): Boolean = usbManager?.hasPermission(device) == true
 
     // --- Auto-reconnect ---------------------------------------------------
     // A USB-C phone connector under a guitar cable's worth of tugging drops the
@@ -247,10 +301,14 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun connect(device: UsbDevice) {
+        val usb = usbManager ?: run {
+            status = "Этот телефон не даёт приложению доступ к USB — подключиться нельзя."
+            return
+        }
         teardown()
         autoReconnect = true
         lastDevice = device
-        val conn = UsbMidiConnection(usbManager, device)
+        val conn = UsbMidiConnection(usb, device)
         val ctl = KatanaController(conn)
         ctl.onTraffic = { dir, sysex ->
             bumpCount(dir == "RX")
@@ -340,7 +398,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
         val fresh = devices.firstOrNull { it.device.deviceName == wanted.deviceName }?.device
         when {
             fresh == null -> scheduleReconnect()
-            !usbManager.hasPermission(fresh) -> {
+            !hasPermission(fresh) -> {
                 status = "Комбик найден, но нужно разрешение USB — нажми «Подключить»."
                 appendLog("— переподключение: нет разрешения USB —")
             }
@@ -374,7 +432,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Action log (what the user pressed, address used, sent or not) ----
-    private var lastActionKey = ""
+    // lastActionKey lives with the other log state above the init block.
 
     private fun logAction(key: String, text: String) = synchronized(actionLog) {
         if (key.isNotEmpty() && key == lastActionKey && actionLog.isNotEmpty()) {
@@ -678,7 +736,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     // what each address means: read the amp's live area, keep the bytes, write
     // the same bytes to the same addresses later. Our labels for those bytes
     // can be wrong and the recall is still faithful.
-    val rawPatches = mutableStateListOf<RawPatch>()
+    // (`rawPatches` itself is declared up with the other state, above `init`.)
     var capturing by mutableStateOf(false)
         private set
     var captureStatus by mutableStateOf("")
@@ -912,6 +970,7 @@ class KatanaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "KatanaViewModel"
         const val APP_NAME = "Katana by Vlad_i_c"
         private const val MAX_LOG_LINES = 400
         private const val NO_RESPONSE_MS = 6_000L
