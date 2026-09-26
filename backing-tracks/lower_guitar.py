@@ -1,7 +1,7 @@
 """Делает гитару тише в готовой записи, остальные инструменты не трогает.
 
     pip install torch demucs soundfile lameenc
-    python lower_guitar.py song.mp3 [-12]
+    python lower_guitar.py song.mp3 [-12] [папка_с_весами]
 """
 import subprocess
 import sys
@@ -14,9 +14,10 @@ import soundfile as sf
 src = Path(sys.argv[1])
 gain_db = float(sys.argv[2]) if len(sys.argv) > 2 else -12.0
 work = Path("separated")
+repo = ["--repo", sys.argv[3]] if len(sys.argv) > 3 else []
 
 subprocess.run([sys.executable, "-m", "demucs", "-n", "htdemucs_6s",
-                "-o", str(work), str(src)], check=True)
+                "-o", str(work), *repo, str(src)], check=True)
 stems_dir = work / "htdemucs_6s" / src.stem
 
 mix, sr = None, None
