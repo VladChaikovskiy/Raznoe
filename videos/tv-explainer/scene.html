@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Как устроен телевизор</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+  body.preview { display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  body.preview canvas { height: 100vh; width: auto; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+window.VIDEO = { width: 1080, height: 1920, fps: 30, duration: 54.5 };
+
+const W = 1080, H = 1920;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const C = {
+  bg: '#06070c', text: '#f3f5fa', dim: '#8b93a7',
+  cyan: '#38e8ff', mag: '#ff3d8b', amber: '#ffb340',
+  red: '#ff3b4e', green: '#2ef59a', blue: '#3f7bff',
+};
+const FONT_H = "'Inter Display','Inter','Segoe UI',Arial,sans-serif";
+const FONT_B = "'Inter','Segoe UI',Arial,sans-serif";
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const eback = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+// видимость сцены: плавное появление и исчезновение
+const vis = (t, a, b, fi = 0.4, fo = 0.4) => Math.min(prog(t, a, a + fi), 1 - prog(t, b - fo, b));
+const reveal = (t, t0, d = 0.55) => eo(prog(t, t0, t0 + d));
+const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+
+function txt(s, x, y, o = {}) {
+  const { size = 48, weight = 700, color = C.text, align = 'center', alpha = 1,
+    font = FONT_H, glow = 0, lh = 1.18, spacing = 0 } = o;
+  if (alpha <= 0.001) return;
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = color;
+  if (spacing) ctx.letterSpacing = spacing + 'px';
+  if (glow) { ctx.shadowColor = typeof color === 'string' ? color : C.cyan; ctx.shadowBlur = glow; }
+  String(s).split('\n').forEach((l, i) => ctx.fillText(l, x, y + i * size * lh));
+  ctx.restore();
+}
+
+// заголовок, который выезжает снизу
+function title(s, y, t, t0, a, o = {}) {
+  const e = reveal(t, t0);
+  txt(s, 540, y + (1 - e) * 40, { size: 68, weight: 800, ...o, alpha: e * a * (o.alpha ?? 1) });
+}
+
+function grad(x0, y0, x1, y1, stops) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+  return g;
+}
+
+function blob(x, y, r, color) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+
+// цифры с фиксированной шириной, чтобы счётчик не дрожал
+function drawNum(str, cx, y, size, color, alpha = 1, glow = 0) {
+  const adv = (ch) => (ch === ' ' ? size * 0.28 : size * 0.62);
+  const total = [...str].reduce((s, ch) => s + adv(ch), 0);
+  let x = cx - total / 2;
+  for (const ch of str) {
+    txt(ch, x + adv(ch) / 2, y, { size, weight: 800, color, alpha, glow });
+    x += adv(ch);
+  }
+}
+const fmt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+// ---------- картинка на экране (4K, попиксельно) ----------
+const IW = 3840, IH = 2160;
+const IMG = document.createElement('canvas');
+IMG.width = IW; IMG.height = IH;
+let PIX = null;
+const TARGET = { x: 1615, y: 602 }; // пиксель на краю солнца, в который «ныряем»
+
+function hash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+// синтвейв-закат: небо, солнце в полоску, неоновая сетка
+function scenic(px, py) {
+  const u = px / IW, v = py / IH, hz = 0.62;
+  let r, g, b;
+  if (v < hz) {
+    const k = v / hz;
+    r = 18 + 230 * Math.pow(k, 1.7);
+    g = 8 + 70 * Math.pow(k, 3.2);
+    b = 58 + 85 * Math.sin(k * Math.PI * 0.85);
+    if (k < 0.7 && hash(px / 9 | 0, py / 9 | 0) > 0.9965) {
+      const s = 0.6 + 0.4 * hash(py / 9 | 0, px / 9 | 0);
+      r = lerp(r, 255, s); g = lerp(g, 245, s); b = lerp(b, 255, s);
+    }
+    const dx = (u - 0.5) * 16 / 9, dy = v - 0.42, d = Math.hypot(dx, dy), R = 0.2;
+    if (d < R) {
+      const ys = dy / R;
+      const gap = ys > -0.05 && ((ys * 7 + 10) % 1) < (ys + 0.05) * 0.55;
+      if (!gap) {
+        const k2 = (ys + 1) / 2;
+        r = 255; g = lerp(225, 55, k2); b = lerp(70, 135, k2);
+      }
+    } else {
+      const glow = Math.pow(clamp(1 - (d - R) / 0.16), 2) * 0.55;
+      r = lerp(r, 255, glow); g = lerp(g, 110, glow); b = lerp(b, 120, glow);
+    }
+  } else {
+    const gz = v - hz;
+    r = 16 + 30 * gz; g = 4; b = 36 + 40 * gz;
+    const fade = clamp(gz / 0.12);
+    const depth = 0.55 / (gz + 0.006);
+    const hl = (depth % 1) < 0.1 + 0.4 * (1 - fade) ? 1 : 0;
+    const xs = (u - 0.5) * 16 / 9 / (gz + 0.02) * 0.9;
+    const vl = Math.abs(xs - Math.round(xs)) < 0.045 ? 1 : 0;
+    const line = Math.max(hl * (0.25 + 0.75 * fade), vl * (0.35 + 0.65 * fade));
+    r = lerp(r, 70, line); g = lerp(g, 225, line); b = lerp(b, 255, line);
+    const hg = Math.pow(clamp(1 - gz / 0.05), 2);
+    r = lerp(r, 255, hg * 0.8); g = lerp(g, 70, hg * 0.8); b = lerp(b, 170, hg * 0.8);
+  }
+  return [r, g, b];
+}
+
+function buildImage() {
+  const ictx = IMG.getContext('2d');
+  const id = ictx.createImageData(IW, IH);
+  const d = id.data;
+  for (let y = 0; y < IH; y++) {
+    for (let x = 0; x < IW; x++) {
+      const [r, g, b] = scenic(x, y);
+      const i = (y * IW + x) * 4;
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
+    }
+  }
+  ictx.putImageData(id, 0, 0);
+  PIX = d;
+}
+const pixAt = (x, y) => { const i = (y * IW + x) * 4; return [PIX[i], PIX[i + 1], PIX[i + 2]]; };
+
+// ---------- фон и общий интерфейс ----------
+function background(t) {
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  blob(540 + Math.sin(t * 0.3) * 220, 520 + Math.cos(t * 0.23) * 160, 760, 'rgba(56,232,255,0.075)');
+  blob(320 + Math.cos(t * 0.27) * 160, 1400 + Math.sin(t * 0.31) * 160, 820, 'rgba(255,61,139,0.065)');
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  const off = (t * 14) % 60;
+  for (let y = -60; y < H + 60; y += 60) {
+    for (let x = 0; x < W; x += 60) ctx.fillRect(x + ((y / 60) % 2 ? 30 : 0), y + off, 2, 2);
+  }
+}
+
+const CHAPTERS = [
+  [4.4, 12.6, '01', 'ПИКСЕЛИ'],
+  [12.6, 21, '02', 'СУБПИКСЕЛИ'],
+  [21, 33, '03', 'МАТРИЦА LCD'],
+  [33, 41, '04', 'OLED'],
+  [41, 49, '05', 'ПРОЦЕССОР'],
+];
+function chapterTag(t) {
+  for (const [a, b, num, name] of CHAPTERS) {
+    const al = vis(t, a, b, 0.35, 0.35);
+    if (al <= 0) continue;
+    const dx = (1 - eo(prog(t, a, a + 0.5))) * -30;
+    ctx.save();
+    ctx.globalAlpha = al;
+    ctx.font = `700 30px ${FONT_B}`;
+    ctx.letterSpacing = '4px';
+    const w = ctx.measureText(name).width + 120;
+    rrect(70 + dx, 212, w, 58, 29);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(56,232,255,0.45)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+    txt(num, 112 + dx, 242, { size: 28, weight: 800, color: C.cyan, alpha: al, font: FONT_B });
+    txt(name, 148 + dx, 242, { size: 30, weight: 700, align: 'left', alpha: al, font: FONT_B, spacing: 4 });
+  }
+}
+
+// ---------- экран ТВ: картинка с отображением «пиксель → экран» ----------
+const S0 = 880 / IW; // масштаб, при котором картинка = экран ТВ шириной 880
+const TV = { cx: 540, cy: 860 };
+const tvX0 = TV.cx - IW * S0 / 2, tvY0 = TV.cy - IH * S0 / 2;
+
+function drawImageMapped(x0, y0, s, skipTarget, otherAlpha) {
+  const sx0 = clamp(Math.floor(-x0 / s), 0, IW), sx1 = clamp(Math.ceil((W - x0) / s), 0, IW);
+  const sy0 = clamp(Math.floor(-y0 / s), 0, IH), sy1 = clamp(Math.ceil((H - y0) / s), 0, IH);
+  if (sx1 <= sx0 || sy1 <= sy0) return;
+  ctx.save();
+  ctx.globalAlpha *= otherAlpha;
+  if (s < 10) {
+    ctx.imageSmoothingEnabled = s < 1.2;
+    ctx.drawImage(IMG, sx0, sy0, sx1 - sx0, sy1 - sy0, x0 + sx0 * s, y0 + sy0 * s, (sx1 - sx0) * s, (sy1 - sy0) * s);
+  } else {
+    const gap = s * 0.12 * clamp((s - 10) / 40);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x0 + sx0 * s, y0 + sy0 * s, (sx1 - sx0) * s, (sy1 - sy0) * s);
+    for (let y = sy0; y < sy1; y++) {
+      for (let x = sx0; x < sx1; x++) {
+        if (skipTarget && x === TARGET.x && y === TARGET.y) continue;
+        const [r, g, b] = pixAt(x, y);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x0 + x * s + gap / 2, y0 + y * s + gap / 2, s - gap, s - gap);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawBezel(x0, y0, s, alpha, glow) {
+  const k = s / S0;
+  const pad = 16 * k, w = IW * s, h = IH * s;
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  if (glow > 0) { ctx.shadowColor = 'rgba(56,232,255,0.55)'; ctx.shadowBlur = 70 * glow; }
+  rrect(x0 - pad, y0 - pad, w + pad * 2, h + pad * 2, 22 * k);
+  ctx.lineWidth = 4 * k;
+  ctx.strokeStyle = '#3a4152';
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- сцена 1: крючок ----------
+function scene1(t) {
+  const a = vis(t, 0, 4.4, 0.01, 0.01);
+  if (a <= 0) return;
+  const textA = 1 - prog(t, 3.7, 4.3);
+  const w = IW * S0, h = IH * S0, pad = 16;
+
+  // подставка
+  ctx.save();
+  ctx.globalAlpha = textA * reveal(t, 0.6);
+  ctx.fillStyle = '#1a1e29';
+  ctx.fillRect(TV.cx - 7, TV.cy + h / 2 + pad, 14, 46);
+  rrect(TV.cx - 150, TV.cy + h / 2 + pad + 44, 300, 12, 6);
+  ctx.fill();
+  ctx.restore();
+
+  // корпус рисуется линией
+  const drawP = eio(prog(t, 0.15, 1.3));
+  ctx.save();
+  rrect(tvX0 - pad, tvY0 - pad, w + pad * 2, h + pad * 2, 22);
+  ctx.fillStyle = '#0a0c12';
+  ctx.globalAlpha = drawP;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  const per = 2 * (w + h + pad * 4);
+  ctx.setLineDash([per * drawP, per]);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = drawP < 1 ? C.cyan : '#3a4152';
+  ctx.stroke();
+  ctx.restore();
+
+  // включение как у старого кинескопа: сначала линия, потом раскрытие
+  const line = prog(t, 0.95, 1.15), open = eo(prog(t, 1.15, 1.6));
+  if (line > 0) {
+    ctx.save();
+    const hh = Math.max(3, h * open);
+    ctx.beginPath();
+    ctx.rect(tvX0 + w / 2 * (1 - line), TV.cy - hh / 2, w * line, hh);
+    ctx.clip();
+    drawImageMapped(tvX0, tvY0, S0, false, 1);
+    ctx.globalAlpha = 1 - prog(t, 1.2, 1.9);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(tvX0, TV.cy - hh / 2, w, hh);
+    ctx.restore();
+    // блик
+    const sw = prog(t, 2.0, 3.0);
+    if (sw > 0 && sw < 1) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(tvX0, tvY0, w, h); ctx.clip();
+      const gx = lerp(tvX0 - 300, tvX0 + w + 300, sw);
+      ctx.fillStyle = grad(gx - 160, 0, gx + 160, 0, ['rgba(255,255,255,0)', 'rgba(255,255,255,0.22)', 'rgba(255,255,255,0)']);
+      ctx.fillRect(tvX0, tvY0, w, h);
+      ctx.restore();
+    }
+    drawBezel(tvX0, tvY0, S0, 1, open);
+  }
+
+  title('Что внутри', 340, t, 0.5, textA, { size: 104 });
+  title('твоего телевизора?', 450, t, 0.8, textA, {
+    size: 80, color: grad(160, 0, 920, 0, [C.cyan, '#9b8cff', C.mag]),
+  });
+  const ce = reveal(t, 2.1);
+  txt('Разбираем за 50 секунд', 540, 1330 + (1 - ce) * 30, { size: 46, weight: 600, color: C.dim, alpha: ce * textA, font: FONT_B });
+}
+
+// ---------- сцена 2: пиксели ----------
+const S1 = 360;
+function zoomState(t) {
+  const z = eio(prog(t, 4.4, 11.4));
+  const s = Math.exp(lerp(Math.log(S0), Math.log(S1), z));
+  const p0x = tvX0 + (TARGET.x + 0.5) * S0, p0y = tvY0 + (TARGET.y + 0.5) * S0;
+  const m = eio(prog(t, 4.4, 9.2));
+  const ax = lerp(p0x, 540, m), ay = lerp(p0y, 880, m);
+  return { s, x0: ax - (TARGET.x + 0.5) * s, y0: ay - (TARGET.y + 0.5) * s };
+}
+
+function scene2(t) {
+  if (t < 4.4 || t > 13.2) return;
+  const { s, x0, y0 } = zoomState(t);
+  const other = 1 - eio(prog(t, 12.0, 12.9));
+  drawImageMapped(x0, y0, s, t > 12.0, other);
+  if (s < 6) drawBezel(x0, y0, s, 1 - prog(s, 2, 6), 1);
+  if (t <= 12.0) {
+    // сам пиксель-цель (чтобы сцена 3 подхватила его без скачка)
+  }
+
+  // затемнение сверху и снизу под текст
+  const sc = prog(t, 5.0, 6.0) * other;
+  if (sc > 0) {
+    ctx.save();
+    ctx.globalAlpha = sc;
+    ctx.fillStyle = grad(0, 0, 0, 620, ['rgba(6,7,12,0.95)', 'rgba(6,7,12,0.85)', 'rgba(6,7,12,0)']);
+    ctx.fillRect(0, 0, W, 620);
+    ctx.fillStyle = grad(0, 1130, 0, 1560, ['rgba(6,7,12,0)', 'rgba(6,7,12,0.9)', 'rgba(6,7,12,0.95)']);
+    ctx.fillRect(0, 1130, W, H - 1130);
+    ctx.restore();
+  }
+
+  const ta = 1 - prog(t, 9.7, 10.1);
+  title('Экран 4K — это сетка', 340, t, 4.9, ta);
+  title('3840 × 2160 точек', 430, t, 5.2, ta, { color: C.cyan, glow: 30 });
+
+  const cA = reveal(t, 6.4) * (1 - prog(t, 11.7, 12.2));
+  const n = 8294400 * eio(prog(t, 6.5, 9.5));
+  drawNum(fmt(n), 540, 1320, 118, C.text, cA, prog(t, 9.4, 9.6) * 40);
+  txt('пикселей на экране', 540, 1420, { size: 42, weight: 600, color: C.dim, alpha: cA, font: FONT_B });
+
+  const tb = 1 - prog(t, 12.0, 12.5);
+  title('Приблизим один', 340, t, 10.2, tb);
+  title('пиксель…', 430, t, 10.45, tb, { color: C.amber, glow: 30 });
+
+  // рамка-прицел вокруг выбранного пикселя
+  const fa = vis(t, 10.4, 12.3, 0.3, 0.3);
+  if (fa > 0) {
+    const pulse = 1 + 0.04 * Math.sin(t * 8);
+    const half = (s / 2 + 26) * pulse;
+    ctx.save();
+    ctx.globalAlpha = fa;
+    ctx.strokeStyle = C.amber;
+    ctx.lineWidth = 6;
+    ctx.shadowColor = C.amber; ctx.shadowBlur = 24;
+    const L = 46;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      ctx.beginPath();
+      ctx.moveTo(540 + sx * half, 880 + sy * (half - L));
+      ctx.lineTo(540 + sx * half, 880 + sy * half);
+      ctx.lineTo(540 + sx * (half - L), 880 + sy * half);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// ---------- сцена 3: субпиксели ----------
+const MIX_KEYS = [
+  [13.2, null, 'Цвет солнца'],
+  [15.0, [1, 1, 0], 'Жёлтый'],
+  [16.1, [1, 0, 1], 'Пурпурный'],
+  [17.2, [0, 1, 1], 'Голубой'],
+  [18.3, [1, 1, 1], 'Белый'],
+  [19.4, [0, 0, 0], 'Чёрный'],
+  [20.3, null, 'Цвет солнца'],
+];
+
+function scene3(t) {
+  const a = vis(t, 12.0, 21.2, 0.01, 0.6);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  const base = pixAt(TARGET.x, TARGET.y).map((v) => v / 255);
+
+  // уровни R,G,B по ключевым кадрам
+  let lv = base, name = MIX_KEYS[0][2];
+  for (let i = 1; i < MIX_KEYS.length; i++) {
+    const [kt, kv, kn] = MIX_KEYS[i];
+    const prev = MIX_KEYS[i - 1][1] ?? base;
+    const k = eio(prog(t, kt - 0.35, kt));
+    if (t >= kt - 0.35) {
+      const target = kv ?? base;
+      lv = prev.map((v, j) => lerp(v, target[j], k));
+      if (t >= kt - 0.17) name = kn;
+    }
+  }
+
+  const sz = lerp(S1, 540, eio(prog(t, 12.2, 13.2)));
+  const split = eio(prog(t, 13.3, 14.2));
+  const gap = 30 * split;
+  const bw = (sz - 2 * gap) / 3;
+  const top = 880 - sz / 2;
+  const chans = [[255, 59, 78], [46, 245, 154], [63, 123, 255]];
+  const labels = ['R', 'G', 'B'];
+  if (split < 0.02) {
+    rrect(540 - sz / 2, top, sz, sz, 4);
+    ctx.fillStyle = rgb(...base.map((v) => v * 255));
+    ctx.fill();
+  }
+  for (let i = 0; i < 3 && split >= 0.02; i++) {
+    const x = 540 - sz / 2 + i * (bw + gap);
+    const lev = lv[i];
+    const full = base.map((v) => v * 255);
+    const own = chans[i].map((v) => v * (0.08 + 0.92 * lev));
+    const col = full.map((v, j) => lerp(v, own[j], split));
+    ctx.save();
+    if (split > 0.5) { ctx.shadowColor = rgb(...chans[i], 0.9); ctx.shadowBlur = 70 * lev * split; }
+    rrect(x, top, bw, sz, 24 * clamp(split * 2) + 4);
+    ctx.fillStyle = rgb(...col);
+    ctx.fill();
+    ctx.restore();
+    if (split > 0.5) {
+      ctx.save();
+      rrect(x, top, bw, sz, 28);
+      ctx.strokeStyle = rgb(...chans[i], 0.5 * split);
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+    const le = reveal(t, 13.9 + i * 0.1);
+    txt(labels[i], x + bw / 2, top + sz + 60, { size: 56, weight: 800, color: rgb(...chans[i]), alpha: le, glow: 20 });
+    txt(Math.round(lev * 100) + '%', x + bw / 2, top - 44, { size: 36, weight: 700, color: C.dim, alpha: le, font: FONT_B });
+  }
+
+  title('Каждый пиксель —', 330, t, 12.5, 1);
+  title('это 3 субпикселя', 420, t, 12.75, 1, { color: grad(260, 0, 820, 0, [C.red, C.green, C.blue]) });
+
+  // результат смешивания
+  const me = reveal(t, 14.4);
+  if (me > 0) {
+    const mix = lv.map((v) => v * 255);
+    ctx.save();
+    ctx.globalAlpha *= me;
+    ctx.shadowColor = rgb(...mix, 0.9); ctx.shadowBlur = 50;
+    ctx.beginPath(); ctx.arc(330, 1330, 56, 0, Math.PI * 2);
+    ctx.fillStyle = rgb(...mix); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.stroke();
+    ctx.restore();
+    txt('=', 230, 1330, { size: 60, weight: 700, color: C.dim, alpha: me });
+    txt(name, 420, 1330, { size: 60, weight: 800, align: 'left', alpha: me });
+    txt('Яркость каждого — от 0 до 100%', 540, 1445, { size: 36, weight: 600, color: C.dim, alpha: me, font: FONT_B });
+  }
+  ctx.restore();
+}
+
+// ---------- сцена 4: слои LCD ----------
+const LAYERS = ['Подсветка\nMini-LED', 'Рассеиватель', 'Поляризатор', 'Жидкие\nкристаллы', 'Цветной\nфильтр', 'Стекло'];
+const LW = 400, LD = 240, LCX = 640, LYB = 1200;
+const isoPt = (x, z, cy) => [LCX + (x - z) * 0.866, cy + (x + z) * 0.5];
+
+function photons() {
+  const list = [];
+  for (let i = 0; i < 27; i++) {
+    const col = i % 9, row = (i / 9) | 0;
+    list.push({
+      x: -160 + col * 40, z: -80 + row * 80 + (hash(i, 3) - 0.5) * 30,
+      ch: col % 3, phase: hash(i, 7), blocked: hash(i, 11) < 0.3,
+    });
+  }
+  return list;
+}
+const PHOTONS = photons();
+
+function drawLayer(i, cy, t, alpha, hi) {
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  // толщина пластины
+  const [lx, ly] = isoPt(-LW / 2, LD / 2, cy), [bx, by] = isoPt(LW / 2, LD / 2, cy), [rx, ry] = isoPt(LW / 2, -LD / 2, cy);
+  ctx.beginPath();
+  ctx.moveTo(lx, ly); ctx.lineTo(bx, by); ctx.lineTo(rx, ry);
+  ctx.lineTo(rx, ry + 10); ctx.lineTo(bx, by + 10); ctx.lineTo(lx, ly + 10); ctx.closePath();
+  ctx.fillStyle = i === 0 ? '#1b2030' : 'rgba(120,140,180,0.25)';
+  ctx.fill();
+
+  ctx.setTransform(0.866, 0.5, -0.866, 0.5, LCX, cy);
+  ctx.beginPath(); ctx.rect(-LW / 2, -LD / 2, LW, LD);
+  const fills = ['#0e121c', 'rgba(220,232,255,0.22)', 'rgba(140,170,255,0.13)', 'rgba(56,232,255,0.08)', 'rgba(0,0,0,0)', 'rgba(255,255,255,0.05)'];
+  ctx.fillStyle = fills[i]; ctx.fill();
+  ctx.save(); ctx.clip();
+  if (i === 0) {
+    for (let x = -176; x <= 176; x += 44) for (let z = -88; z <= 88; z += 44) {
+      ctx.shadowColor = '#cfe6ff'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(x, z, 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#f2f8ff'; ctx.fill();
+    }
+  } else if (i === 2) {
+    ctx.strokeStyle = 'rgba(170,190,255,0.4)'; ctx.lineWidth = 2;
+    for (let x = -LW / 2; x <= LW / 2; x += 14) { ctx.beginPath(); ctx.moveTo(x, -LD / 2); ctx.lineTo(x, LD / 2); ctx.stroke(); }
+  } else if (i === 3) {
+    ctx.strokeStyle = C.cyan; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    for (let x = -180; x <= 180; x += 30) for (let z = -100; z <= 100; z += 28) {
+      const ang = Math.sin(t * 2.2 + x * 0.02 + z * 0.03) * 1.3;
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(ang) * 9, z - Math.sin(ang) * 9);
+      ctx.lineTo(x + Math.cos(ang) * 9, z + Math.sin(ang) * 9);
+      ctx.stroke();
+    }
+  } else if (i === 4) {
+    const cols = ['rgba(255,59,78,0.6)', 'rgba(46,245,154,0.6)', 'rgba(63,123,255,0.65)'];
+    for (let k = 0, x = -LW / 2; x < LW / 2; x += 40 / 3, k++) { ctx.fillStyle = cols[k % 3]; ctx.fillRect(x, -LD / 2, 40 / 3 - 1.5, LD); }
+  } else if (i === 5) {
+    ctx.fillStyle = grad(-LW / 2, -LD / 2, LW / 2, LD / 2, ['rgba(255,255,255,0)', 'rgba(255,255,255,0.18)', 'rgba(255,255,255,0)']);
+    ctx.fillRect(-LW / 2, -LD / 2, LW, LD);
+  }
+  ctx.restore();
+  ctx.beginPath(); ctx.rect(-LW / 2, -LD / 2, LW, LD);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.lineWidth = hi ? 3 : 2;
+  ctx.strokeStyle = hi ? C.cyan : 'rgba(200,215,255,0.45)';
+  if (hi) { ctx.shadowColor = C.cyan; ctx.shadowBlur = 20; }
+  ctx.stroke();
+  ctx.restore();
+
+  // подпись слева
+  const [cx0, cy0] = isoPt(-LW / 2, LD / 2, cy);
+  const lines = LAYERS[i].split('\n').length;
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.strokeStyle = hi ? C.cyan : 'rgba(139,147,167,0.6)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx0 - 12, cy0); ctx.lineTo(cx0 - 34, cy0); ctx.stroke();
+  ctx.restore();
+  txt(LAYERS[i], cx0 - 44, cy0 - (lines - 1) * 17, {
+    size: 30, weight: hi ? 800 : 600, align: 'right', color: hi ? C.text : C.dim,
+    alpha: alpha, font: FONT_B, lh: 1.1,
+  });
+}
+
+function scene4(t) {
+  const a = vis(t, 21, 33.2, 0.4, 0.6);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  const g = lerp(12, 112, eio(prog(t, 23.3, 24.6)));
+  const steps = [[25.4, 0], [27.2, 3], [29.0, 4], [30.8, -1]];
+  let active = null;
+  for (const [st, idx] of steps) if (t >= st) active = idx;
+
+  const chRGB = [[255, 59, 78], [46, 245, 154], [63, 123, 255]];
+  const photonOn = prog(t, 25.3, 25.6) * (1 - prog(t, 32.6, 33.0));
+  const span = 5 * g + 240;
+  const drawPhotons = (hMin, hMax) => {
+    if (photonOn <= 0) return;
+    for (const ph of PHOTONS) {
+      const age = (t - 25.4) - ph.phase * 1.6;
+      if (age < 0) continue;
+      const h = (age * 300) % span;
+      if (h < hMin || h >= hMax) continue;
+      let alpha = photonOn, color = [245, 250, 255];
+      if (ph.blocked && h > 3 * g) continue;
+      if (h > 4 * g) { color = chRGB[ph.ch]; }
+      if (h > 5 * g) alpha *= 1 - (h - 5 * g) / 240;
+      const [px, py] = isoPt(ph.x, ph.z, LYB - h);
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.strokeStyle = rgb(...color, 0.5); ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + Math.min(46, h)); ctx.stroke();
+      ctx.shadowColor = rgb(...color); ctx.shadowBlur = 22;
+      ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fillStyle = rgb(...color); ctx.fill();
+      ctx.restore();
+    }
+  };
+
+  for (let i = 0; i < 6; i++) {
+    const e = eo(prog(t, 21.3 + i * 0.28, 21.85 + i * 0.28));
+    const cy = LYB - i * g - (1 - e) * 90;
+    const hi = active === i || active === -1;
+    drawLayer(i, cy, t, e, active !== null && hi);
+    drawPhotons(i * g, i === 5 ? 1e9 : (i + 1) * g);
+  }
+
+  title('Внутри LCD-экрана —', 330, t, 21.4, 1, { size: 62 });
+  title('«бутерброд» из 6 слоёв', 410, t, 21.65, 1, { size: 62, color: C.cyan, glow: 26 });
+
+  const caps = [
+    [23.6, 25.3, 'Свет идёт сзади вперёд ↑'],
+    [25.4, 27.1, 'LED-подсветка светит белым'],
+    [27.2, 28.9, 'Кристаллы поворачиваются\nи дозируют свет'],
+    [29.0, 30.7, 'Фильтр красит свет\nв красный, зелёный или синий'],
+    [30.8, 33.2, 'QLED — то же, но с квантовыми\nточками для сочных цветов'],
+  ];
+  for (const [ca, cb, s] of caps) {
+    const al = vis(t, ca, cb, 0.3, 0.25);
+    const e = reveal(t, ca, 0.4);
+    const two = s.includes('\n');
+    txt(s, 540, (two ? 1405 : 1430) + (1 - e) * 20, { size: 40, weight: 700, alpha: al, font: FONT_B });
+  }
+  ctx.restore();
+}
+
+// ---------- сцена 5: OLED против LCD ----------
+function nightPanel(t, y, isOled, alpha) {
+  const x = 90, w = 900, h = 400;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  rrect(x, y, w, h, 30);
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = isOled ? '#000' : '#141823';
+  ctx.fillRect(x, y, w, h);
+  const k = prog(t, 33.4, 41);
+  const mx = x + w * lerp(0.28, 0.72, eio(k)), my = y + 205 + Math.sin(t * 1.3) * 14;
+  if (!isOled) {
+    // зоны подсветки: светятся блоками вокруг луны — «ореол»
+    const cs = 50;
+    for (let gy = y; gy < y + h; gy += cs) for (let gx = x; gx < x + w; gx += cs) {
+      const d = Math.hypot(gx + cs / 2 - mx, gy + cs / 2 - my);
+      const b = Math.pow(clamp(1 - d / 190), 1.4);
+      if (b > 0) { ctx.fillStyle = `rgba(190,205,255,${b * 0.32})`; ctx.fillRect(gx, gy, cs, cs); }
+    }
+  }
+  for (let i = 0; i < 26; i++) {
+    const sx = x + 30 + hash(i, 1) * (w - 60), sy = y + 100 + hash(i, 2) * (h - 190);
+    const tw = 0.6 + 0.4 * Math.sin(t * 3 + i);
+    ctx.fillStyle = isOled ? `rgba(255,255,255,${0.9 * tw})` : `rgba(255,255,255,${0.45 * tw})`;
+    ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.shadowColor = 'rgba(255,248,225,0.8)'; ctx.shadowBlur = isOled ? 30 : 60;
+  ctx.beginPath(); ctx.arc(mx, my, 54, 0, Math.PI * 2);
+  ctx.fillStyle = '#f6f1df'; ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(200,190,170,0.5)';
+  ctx.beginPath(); ctx.arc(mx - 16, my - 10, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(mx + 18, my + 16, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = isOled ? 'rgba(56,232,255,0.6)' : 'rgba(139,147,167,0.5)';
+  rrect(x, y, w, h, 30); ctx.stroke();
+  ctx.restore();
+
+  txt(isOled ? 'OLED' : 'LCD', x + 40, y + 56, { size: 46, weight: 800, align: 'left', alpha, color: isOled ? C.cyan : C.text });
+  txt(isOled ? 'пиксель выключен = идеальный чёрный' : 'чёрный сероватый, вокруг ярких мест ореол',
+    x + 40, y + h - 42, { size: 28, weight: 600, align: 'left', alpha, color: C.dim, font: FONT_B });
+}
+
+function scene5(t) {
+  const a = vis(t, 33, 41.2, 0.4, 0.5);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  title('OLED: каждый пиксель', 330, t, 33.2, 1, { size: 64 });
+  title('светится сам', 410, t, 33.45, 1, { size: 64, color: grad(330, 0, 750, 0, [C.cyan, C.mag]), glow: 24 });
+  const e1 = reveal(t, 33.6, 0.6), e2 = reveal(t, 34.1, 0.6);
+  nightPanel(t, 520 + (1 - e1) * 40, false, e1);
+  nightPanel(t, 990 + (1 - e2) * 40, true, e2);
+  const ve = eback(prog(t, 34.6, 35.1));
+  if (ve > 0) {
+    ctx.save();
+    ctx.translate(540, 955); ctx.scale(ve, ve);
+    ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI * 2);
+    ctx.fillStyle = C.bg; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = C.mag; ctx.stroke();
+    ctx.restore();
+    txt('VS', 540, 956, { size: 30, weight: 800, color: C.mag, alpha: clamp(ve) });
+  }
+  const ce = reveal(t, 37.5);
+  txt('Поэтому у OLED самая глубокая ночь в кадре', 540, 1460, { size: 34, weight: 600, color: C.dim, alpha: ce * (1 - prog(t, 40.6, 41)), font: FONT_B });
+  ctx.restore();
+}
+
+// ---------- сцена 6: процессор ----------
+function scene6(t) {
+  const a = vis(t, 41, 49.2, 0.4, 0.5);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  title('Процессор готовит', 330, t, 41.2, 1, { size: 66 });
+  title('каждый кадр', 410, t, 41.45, 1, { size: 66, color: C.amber, glow: 26 });
+
+  const X = 290;
+  // соединительные линии и поток данных
+  const flowOn = prog(t, 42.0, 42.4);
+  const segs = [[690, 810], [1050, 1175]];
+  segs.forEach(([y0, y1], si) => {
+    const le = eo(prog(t, 41.9 + si * 0.3, 42.4 + si * 0.3));
+    ctx.save();
+    ctx.strokeStyle = 'rgba(139,147,167,0.35)'; ctx.lineWidth = 3; ctx.setLineDash([8, 10]);
+    ctx.beginPath(); ctx.moveTo(X, y0); ctx.lineTo(X, lerp(y0, y1, le)); ctx.stroke();
+    ctx.restore();
+    if (flowOn > 0) {
+      for (let k = 0; k < 4; k++) {
+        const f = ((t * 1.4 + k / 4) % 1);
+        const yy = lerp(y0, y1, f);
+        const col = si === 0 ? C.cyan : [C.red, C.green, C.blue, C.amber][k];
+        ctx.save();
+        ctx.globalAlpha *= flowOn * Math.sin(f * Math.PI);
+        ctx.shadowColor = col; ctx.shadowBlur = 18; ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(X, yy, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
+  });
+
+  // источник сигнала
+  const ea = reveal(t, 41.6);
+  ctx.save();
+  ctx.globalAlpha *= ea;
+  rrect(X - 200, 560 + (1 - ea) * 30, 400, 130, 26);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(56,232,255,0.5)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.restore();
+  txt('ВХОДЯЩИЙ СИГНАЛ', X, 596 + (1 - ea) * 30, { size: 24, weight: 700, color: C.dim, alpha: ea, font: FONT_B, spacing: 3 });
+  txt('HDMI · Wi-Fi · антенна', X, 646 + (1 - ea) * 30, { size: 36, weight: 800, alpha: ea });
+
+  // чип
+  const ec = eback(prog(t, 41.9, 42.5));
+  if (ec > 0) {
+    ctx.save();
+    ctx.translate(X, 930); ctx.scale(ec, ec);
+    ctx.strokeStyle = '#8b93a7'; ctx.lineWidth = 6;
+    for (let k = -2; k <= 2; k++) {
+      const o = k * 38;
+      for (const [x1, y1, x2, y2] of [[o, -115, o, -140], [o, 115, o, 140], [-115, o, -140, o], [115, o, 140, o]]) {
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+    }
+    rrect(-115, -115, 230, 230, 22);
+    ctx.fillStyle = '#10131c'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 30; ctx.stroke();
+    const pulse = 0.6 + 0.4 * Math.sin(t * 6);
+    ctx.shadowBlur = 40 * pulse; ctx.shadowColor = C.amber;
+    rrect(-62, -62, 124, 124, 14);
+    ctx.fillStyle = grad(-62, -62, 62, 62, ['#3a2a10', '#6b4a12']); ctx.fill();
+    ctx.restore();
+    txt('SoC', X, 932, { size: 46, weight: 800, color: C.amber, alpha: clamp(ec), glow: 20 * pulse });
+  }
+
+  const bullets = ['Распаковывает видео', 'Повышает чёткость', 'Дорисовывает кадры', 'Настраивает цвета'];
+  bullets.forEach((b, i) => {
+    const e = reveal(t, 42.9 + i * 0.45);
+    const y = 840 + i * 64;
+    ctx.save();
+    ctx.globalAlpha *= e;
+    ctx.fillStyle = C.amber; ctx.shadowColor = C.amber; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(510 + (1 - e) * 30, y, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    txt(b, 534 + (1 - e) * 30, y, { size: 34, weight: 600, align: 'left', alpha: e, font: FONT_B });
+  });
+
+  // матрица
+  const em = reveal(t, 42.4);
+  const my = 1180 + (1 - em) * 30;
+  ctx.save();
+  ctx.globalAlpha *= em;
+  rrect(X - 200, my, 400, 225, 18);
+  ctx.fillStyle = '#0a0c12'; ctx.fill();
+  ctx.save(); ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  const pan = Math.sin(t * 0.8) * 30;
+  ctx.drawImage(IMG, X - 200 - 30 + pan, my, 460, 259);
+  ctx.restore();
+  const flash = t > 45.8 ? 0.5 + 0.5 * Math.sin(t * 40) : 0;
+  ctx.lineWidth = 3; ctx.strokeStyle = t > 45.8 ? rgb(56, 232, 255, 0.5 + 0.5 * flash) : '#3a4152';
+  rrect(X - 200, my, 400, 225, 18); ctx.stroke();
+  ctx.restore();
+  txt('МАТРИЦА', X, my + 260, { size: 24, weight: 700, color: C.dim, alpha: em, font: FONT_B, spacing: 3 });
+
+  const fe = reveal(t, 45.8);
+  txt('120 кадров', 510, 1255, { size: 62, weight: 800, align: 'left', alpha: fe, color: C.cyan, glow: 26 });
+  txt('в секунду', 510, 1320, { size: 38, weight: 600, align: 'left', alpha: fe, font: FONT_B });
+  const frame = Math.max(0, Math.floor((t - 45.8) * 120));
+  txt('кадр № ' + fmt(frame), 510, 1380, { size: 28, weight: 600, align: 'left', alpha: fe, color: C.dim, font: FONT_B });
+  ctx.restore();
+}
+
+// ---------- сцена 7: итог ----------
+function scene7(t) {
+  const a = vis(t, 49, 54.6, 0.4, 0.01);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  title('Итого каждую секунду:', 360, t, 49.2, 1, { size: 54, color: C.dim, weight: 700 });
+  const rows = [
+    ['8 294 400 пикселей', C.text, 49.6],
+    ['× 3 субпикселя', C.mag, 50.0],
+    ['× 120 раз в секунду', C.cyan, 50.4],
+  ];
+  rows.forEach(([s, col, t0], i) => title(s, 520 + i * 96, t, t0, 1, { size: 62, color: col }));
+  const le = eio(prog(t, 50.8, 51.3));
+  ctx.save();
+  ctx.globalAlpha *= le;
+  ctx.fillStyle = grad(140, 0, 940, 0, ['rgba(255,255,255,0)', 'rgba(255,255,255,0.5)', 'rgba(255,255,255,0)']);
+  ctx.fillRect(540 - 380 * le, 838, 760 * le, 3);
+  ctx.restore();
+
+  const pe = eback(prog(t, 51.1, 51.7));
+  if (pe > 0) {
+    ctx.save();
+    ctx.translate(540, 975); ctx.scale(pe, pe);
+    txt('≈ 3 млрд', 0, 0, { size: 156, weight: 900, color: grad(-330, 0, 330, 0, [C.cyan, '#9b8cff', C.mag]), glow: 50 });
+    ctx.restore();
+  }
+  txt('изменений яркости', 540, 1105 + (1 - reveal(t, 51.5)) * 30, { size: 46, weight: 700, alpha: reveal(t, 51.5), font: FONT_B });
+
+  const be = reveal(t, 52.4);
+  if (be > 0) {
+    const pulse = 1 + 0.03 * Math.sin(t * 7);
+    ctx.save();
+    ctx.globalAlpha *= be;
+    ctx.translate(540, 1320 + (1 - be) * 30); ctx.scale(pulse, pulse);
+    rrect(-330, -50, 660, 100, 50);
+    ctx.fillStyle = grad(-330, 0, 330, 0, [C.mag, '#ff6a5c']);
+    ctx.shadowColor = C.mag; ctx.shadowBlur = 40;
+    ctx.fill();
+    ctx.restore();
+    txt('Подпишись — разберём ещё', 540, 1321 + (1 - be) * 30, { size: 38, weight: 800, alpha: be, font: FONT_B });
+  }
+  ctx.restore();
+}
+
+// ---------- главный кадр ----------
+function renderAt(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  background(t);
+  scene1(t);
+  scene2(t);
+  scene3(t);
+  scene4(t);
+  scene5(t);
+  scene6(t);
+  scene7(t);
+  chapterTag(t);
+}
+window.renderAt = renderAt;
+
+(async () => {
+  await document.fonts.load(`800 60px ${FONT_H}`);
+  await document.fonts.load(`600 40px ${FONT_B}`);
+  buildImage();
+  renderAt(0);
+  window.READY = true;
+  if (!location.search.includes('render')) {
+    document.body.classList.add('preview');
+    const start = performance.now();
+    const loop = () => {
+      renderAt(((performance.now() - start) / 1000) % VIDEO.duration);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+})();
+</script>
+</body>
+</html>
