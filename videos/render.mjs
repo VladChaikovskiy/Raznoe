@@ -5,6 +5,9 @@
 //   node videos/render.mjs videos/tv-explainer                 — полный рендер
 //   node videos/render.mjs videos/tv-explainer --stills 2,9,15 — только кадры-превью (PNG)
 //
+// Сцены лежат в подпапках videos/ и отдаются локальным HTTP-сервером
+// (для three.js нужен `npm install` в videos/).
+//
 // Сцена обязана выставить window.VIDEO = {width, height, fps, duration},
 // window.renderAt(t) и window.READY = true. Если рядом лежит audio.mjs
 // с export generate(duration, sampleRate) → {left, right}, звук добавится в ролик.
@@ -12,9 +15,10 @@
 import { createRequire } from 'node:module';
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -67,14 +71,36 @@ function writeWav(file, left, right, sampleRate) {
   fs.writeFileSync(file, buf);
 }
 
+// Сцены отдаются по HTTP из папки videos/, чтобы работали ES-модули и import map
+// (three.js из videos/node_modules).
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
+function serve(root) {
+  const server = http.createServer((req, res) => {
+    const file = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+    fs.createReadStream(file).pipe(res);
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
 const args = parseArgs(process.argv.slice(2));
 const name = path.basename(args.dir);
-const scene = path.join(args.dir, 'scene.html');
+const root = path.dirname(fileURLToPath(import.meta.url));
+const server = await serve(root);
+const sceneUrl = `http://127.0.0.1:${server.address().port}/${path.relative(root, args.dir)}/scene.html?render=1`;
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+});
 const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
-await page.goto(pathToFileURL(scene).href + '?render=1');
+page.on('pageerror', (e) => console.error('page error:', e.message));
+page.on('console', (m) => m.type() === 'error' && console.error('console:', m.text()));
+await page.goto(sceneUrl);
 await page.waitForFunction(() => window.READY === true, null, { timeout: 120000 });
 const cfg = await page.evaluate(() => window.VIDEO);
 await page.setViewportSize({ width: cfg.width, height: cfg.height });
@@ -89,6 +115,7 @@ if (args.stills) {
     console.log(file);
   }
   await browser.close();
+  server.close();
   process.exit(0);
 }
 
@@ -132,4 +159,5 @@ for (let i = 0; i < frames; i++) {
 ff.stdin.end();
 await ffDone;
 await browser.close();
+server.close();
 console.log(`done: ${out}`);

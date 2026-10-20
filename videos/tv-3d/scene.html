@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Телевизор в 3D</title>
+<style>
+  html, body { margin: 0; background: #fdf8f1; overflow: hidden; }
+  #stage { position: relative; width: 1080px; height: 1920px; transform-origin: 0 0; }
+  #stage canvas { position: absolute; left: 0; top: 0; display: block; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "../node_modules/three/build/three.module.js",
+  "three/addons/": "../node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="stage"><canvas id="ui" width="1080" height="1920"></canvas></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+window.VIDEO = { width: 1080, height: 1920, fps: 30, duration: 56 };
+const W = 1080, H = 1920;
+
+// ---------- палитра и помощники ----------
+const P = {
+  ink: '#1e2433', sub: '#6b7385', cream: '#fdf8f1',
+  coral: '#ff6b6b', mint: '#1fbf9f', sky: '#4d9fff', sun: '#ffb627', lav: '#8f7cff', pink: '#ff7eb6',
+  R: '#ff4d5e', G: '#2fd27a', B: '#3d7dff',
+};
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const eback = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const vis = (t, a, b, fi = 0.4, fo = 0.4) => Math.min(prog(t, a, a + fi), 1 - prog(t, b - fo, b));
+const reveal = (t, t0, d = 0.5) => eo(prog(t, t0, t0 + d));
+function hash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+// ---------- рендерер, сцена, свет ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('stage').prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+{
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 512;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 512);
+  gr.addColorStop(0, '#fffaf2');
+  gr.addColorStop(0.55, '#fbf1ea');
+  gr.addColorStop(1, '#efeaff');
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.75;
+
+scene.add(new THREE.HemisphereLight('#ffffff', '#eadfce', 1.3));
+const key = new THREE.DirectionalLight('#fff7ec', 2.4);
+key.position.set(4, 9, 6);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
+scene.add(key);
+const fill = new THREE.DirectionalLight('#d9d2ff', 0.7);
+fill.position.set(-6, 3, 2);
+scene.add(fill);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.13 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.05, 200);
+
+const mat = (color, o = {}) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.4, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.25, ...o });
+const rbox = (w, h, d, r = 0.04, seg = 4) => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3));
+function mesh(geo, material, parent, pos = [0, 0, 0], shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(...pos);
+  m.castShadow = shadow; m.receiveShadow = shadow;
+  parent.add(m);
+  return m;
+}
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+// ---------- картинка на экране: светлый мультяшный пейзаж ----------
+function drawArt(g, w, h) {
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.7);
+  sky.addColorStop(0, '#6cc2ff'); sky.addColorStop(0.6, '#bfe3ff'); sky.addColorStop(1, '#ffe2c2');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  const sx = w * 0.68, sy = h * 0.36, sr = h * 0.11;
+  const glow = g.createRadialGradient(sx, sy, sr * 0.8, sx, sy, sr * 2.6);
+  glow.addColorStop(0, 'rgba(255,214,120,0.85)'); glow.addColorStop(1, 'rgba(255,214,120,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffd04d'; g.beginPath(); g.arc(sx, sy, sr, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.95)';
+  for (const [cx, cy, s] of [[0.18, 0.2, 1], [0.42, 0.12, 0.7], [0.86, 0.18, 0.8]]) {
+    for (const [dx, dy, r] of [[0, 0, 34], [36, 8, 26], [-34, 10, 24], [12, -18, 26]]) {
+      g.beginPath(); g.arc(cx * w + dx * s * w / 1024, cy * h + dy * s * w / 1024, r * s * w / 1024, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const hill = (y0, amp, freq, phase, color) => {
+    g.fillStyle = color; g.beginPath(); g.moveTo(0, h);
+    for (let x = 0; x <= w; x += 8) g.lineTo(x, y0 * h + Math.sin(x / w * freq + phase) * amp * h);
+    g.lineTo(w, h); g.fill();
+  };
+  hill(0.62, 0.05, 5, 0.4, '#a4e6bd');
+  hill(0.72, 0.06, 4, 2.2, '#63cf95');
+  hill(0.84, 0.05, 3.2, 4.1, '#36b47d');
+  // домик
+  const hx = w * 0.26, hy = h * 0.69;
+  g.fillStyle = '#fff4e4'; g.fillRect(hx, hy, w * 0.07, h * 0.08);
+  g.fillStyle = '#ff6b6b'; g.beginPath(); g.moveTo(hx - w * 0.01, hy); g.lineTo(hx + w * 0.035, hy - h * 0.06); g.lineTo(hx + w * 0.08, hy); g.fill();
+  g.fillStyle = '#4d9fff'; g.fillRect(hx + w * 0.02, hy + h * 0.025, w * 0.02, h * 0.03);
+  // деревья
+  for (const [tx, ty] of [[0.12, 0.74], [0.5, 0.77], [0.83, 0.8]]) {
+    g.fillStyle = '#9a6b4f'; g.fillRect(tx * w - 4, ty * h, 8, h * 0.05);
+    g.fillStyle = '#239b67'; g.beginPath(); g.arc(tx * w, ty * h - 6, h * 0.035, 0, Math.PI * 2); g.fill();
+  }
+}
+const ART = document.createElement('canvas');
+ART.width = 1024; ART.height = 576;
+drawArt(ART.getContext('2d'), 1024, 576);
+const artTex = new THREE.CanvasTexture(ART);
+artTex.colorSpace = THREE.SRGBColorSpace;
+artTex.anisotropy = 8;
+
+// ---------- 3D-модель телевизора ----------
+const tvStage = new THREE.Group();
+scene.add(tvStage);
+const TV_Y = 1.5;
+const tv = new THREE.Group();
+tv.position.y = TV_Y;
+tvStage.add(tv);
+mesh(rbox(3.2, 1.86, 0.07, 0.03), mat('#23262f', { roughness: 0.3, metalness: 0.2, clearcoat: 1 }), tv);
+const screenMesh = mesh(new THREE.PlaneGeometry(3.12, 1.78), new THREE.MeshBasicMaterial({ map: artTex, toneMapped: false }), tv, [0, 0, 0.0362], false);
+mesh(rbox(2.2, 1.15, 0.16, 0.06), mat('#eeeae4', { roughness: 0.55 }), tv, [0, -0.1, -0.11]);
+for (let i = 0; i < 4; i++) mesh(rbox(0.16, 0.07, 0.05, 0.015), mat('#3a3f4c'), tv, [0.75, 0.15 - i * 0.12, -0.2]);
+mesh(rbox(0.22, 0.95, 0.07, 0.03), mat('#d8d2c8', { metalness: 0.5, roughness: 0.3 }), tvStage, [0, 0.55, -0.2]);
+mesh(rbox(1.3, 0.05, 0.6, 0.025), mat('#d8d2c8', { metalness: 0.5, roughness: 0.3 }), tvStage, [0, 0.04, -0.1]);
+
+// ---------- сцена «пиксели и субпиксели» ----------
+const pixStage = new THREE.Group();
+scene.add(pixStage);
+const COLS = 20, ROWS = 12, PITCH = 0.36, WALL_Y = 2.3;
+const tileColors = [];
+{
+  const c = document.createElement('canvas');
+  c.width = COLS; c.height = ROWS;
+  const g = c.getContext('2d');
+  g.drawImage(ART, 0, 0, 1024, 576, 0, 0, COLS, ROWS);
+  const d = g.getImageData(0, 0, COLS, ROWS).data;
+  const hsl = {};
+  for (let i = 0; i < COLS * ROWS; i++) {
+    // чуть насыщеннее, чтобы мозаика читалась после тонмаппинга
+    const c = new THREE.Color().setRGB(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255, THREE.SRGBColorSpace);
+    c.getHSL(hsl);
+    c.setHSL(hsl.h, Math.min(1, hsl.s * 1.25), hsl.l * 0.94);
+    const o = {};
+    c.getRGB(o, THREE.SRGBColorSpace);
+    tileColors.push([o.r, o.g, o.b].map((v) => Math.round(clamp(v) * 255)));
+  }
+}
+const TC = { c: 13, r: 4 }; // плитка внутри солнца
+const tiles = new THREE.InstancedMesh(rbox(0.31, 0.31, 0.14, 0.045, 3), mat('#ffffff', { roughness: 0.3 }), COLS * ROWS);
+tiles.castShadow = true; tiles.receiveShadow = true;
+for (let i = 0; i < COLS * ROWS; i++) tiles.setColorAt(i, new THREE.Color().setStyle(`rgb(${tileColors[i].join(',')})`));
+pixStage.add(tiles);
+const tilePos = (c, r) => [(c - (COLS - 1) / 2) * PITCH, WALL_Y + ((ROWS - 1) / 2 - r) * PITCH, 0];
+const baseRGB = tileColors[TC.r * COLS + TC.c].map((v) => v / 255);
+
+const bigTile = mesh(rbox(0.31, 0.31, 0.14, 0.045, 3), mat(new THREE.Color().setStyle(`rgb(${tileColors[TC.r * COLS + TC.c].join(',')})`), { roughness: 0.3 }), pixStage);
+const CH = [P.R, P.G, P.B].map((c) => new THREE.Color().setStyle(c));
+const bars = CH.map((c) => {
+  const m = mesh(rbox(0.3, 1, 0.3, 0.1), mat(c.clone(), { roughness: 0.25, emissive: c.clone(), emissiveIntensity: 0, envMapIntensity: 0.35 }), pixStage);
+  const light = new THREE.PointLight(c, 0, 4, 1.6);
+  pixStage.add(light);
+  return { m, light, c };
+});
+const mixBall = mesh(new THREE.SphereGeometry(0.24, 48, 32), mat('#ffffff', { roughness: 0.15, emissiveIntensity: 0.5 }), pixStage);
+
+// ---------- сцена «слои LCD» ----------
+const layStage = new THREE.Group();
+scene.add(layStage);
+const SW = 2.6, SD = 1.6;
+const stripes = (cols, alpha) => canvasTex(512, 256, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  const n = cols.length * 24;
+  for (let i = 0; i < n; i++) { g.fillStyle = cols[i % cols.length]; g.globalAlpha = alpha; g.fillRect(i * w / n, 0, w / n - 2, h); }
+});
+const slabs = [];
+const slabDefs = [
+  { name: 'Подсветка\nMini-LED', m: mat('#f5f3ef', { roughness: 0.6 }) },
+  { name: 'Рассеиватель', m: mat('#ffffff', { transparent: true, opacity: 0.55, roughness: 0.9, clearcoat: 0 }) },
+  { name: 'Поляризатор', m: mat('#cfc6ff', { transparent: true, opacity: 0.55, map: stripes(['#7d6cff', '#e4dfff'], 1) }) },
+  { name: 'Жидкие кристаллы', m: mat('#c7f5e8', { transparent: true, opacity: 0.45 }) },
+  { name: 'Цветной фильтр', m: mat('#ffffff', { transparent: true, opacity: 0.85, map: stripes([P.R, P.G, P.B], 1) }) },
+  { name: 'Стекло', m: mat('#dff1ff', { transparent: true, opacity: 0.3, roughness: 0.05, clearcoat: 1 }) },
+];
+slabDefs.forEach((d, i) => {
+  const g = new THREE.Group();
+  const m = mesh(rbox(SW, 0.06, SD, 0.025), d.m, g);
+  if (d.m.transparent) { d.m.depthWrite = false; m.castShadow = false; }
+  m.renderOrder = i;
+  layStage.add(g);
+  slabs.push(g);
+});
+{
+  const leds = new THREE.InstancedMesh(new THREE.SphereGeometry(0.055, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e0', emissiveIntensity: 2.2 }), 12 * 7);
+  const o = new THREE.Object3D();
+  let k = 0;
+  for (let x = 0; x < 12; x++) for (let z = 0; z < 7; z++) {
+    o.position.set((x - 5.5) * 0.2, 0.03, (z - 3) * 0.2);
+    o.updateMatrix(); leds.setMatrixAt(k++, o.matrix);
+  }
+  slabs[0].add(leds);
+}
+const rods = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.018, 0.018, 0.13, 8), new THREE.MeshStandardMaterial({ color: '#13a889', roughness: 0.4 }), 12 * 7);
+slabs[3].add(rods);
+const PH_N = 30;
+const photons = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 16, 12), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), PH_N);
+photons.frustumCulled = false;
+layStage.add(photons);
+const PH = Array.from({ length: PH_N }, (_, i) => ({
+  x: ((i % 10) - 4.5) * 0.24, z: (Math.floor(i / 10) - 1) * 0.45 + (hash(i, 3) - 0.5) * 0.15,
+  ch: i % 3, phase: hash(i, 7), blocked: hash(i, 11) < 0.3,
+}));
+
+// ---------- сцена «OLED против LCD» ----------
+const oledStage = new THREE.Group();
+scene.add(oledStage);
+const nightCanvas = (oled) => { const c = document.createElement('canvas'); c.width = 768; c.height = 432; return c; };
+const lcdC = nightCanvas(false), oledC = nightCanvas(true);
+const lcdTex = new THREE.CanvasTexture(lcdC), oledTex = new THREE.CanvasTexture(oledC);
+lcdTex.colorSpace = oledTex.colorSpace = THREE.SRGBColorSpace;
+function panel(y, depth, tex, glowEdge) {
+  const g = new THREE.Group();
+  g.position.y = y;
+  mesh(rbox(2.5, 1.45, depth, 0.02), mat('#23262f', { roughness: 0.3, metalness: 0.2, clearcoat: 1 }), g);
+  mesh(new THREE.PlaneGeometry(2.42, 1.37), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), g, [0, 0, depth / 2 + 0.002], false);
+  if (glowEdge) {
+    const glowM = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff4d6', emissiveIntensity: 2 });
+    mesh(new THREE.BoxGeometry(2.46, 1.41, 0.03), glowM, g, [0, 0, -depth / 2 + 0.03], false);
+    mesh(rbox(2.5, 1.45, 0.04, 0.015), mat('#23262f'), g, [0, 0, -depth / 2 - 0.02]);
+  }
+  oledStage.add(g);
+  return g;
+}
+const lcdPanel = panel(2.75, 0.14, lcdTex, true);
+const oledPanel = panel(1.0, 0.03, oledTex, false);
+function drawNight(c, t, oled) {
+  const g = c.getContext('2d'), w = c.width, h = c.height;
+  g.fillStyle = oled ? '#000000' : '#2a2f3e';
+  g.fillRect(0, 0, w, h);
+  const k = prog(t, 34.5, 42.5);
+  const mx = w * lerp(0.25, 0.75, eio(k)), my = h * 0.45 + Math.sin(t * 1.3) * 10;
+  if (!oled) {
+    const cs = 48;
+    for (let y = 0; y < h; y += cs) for (let x = 0; x < w; x += cs) {
+      const d = Math.hypot(x + cs / 2 - mx, y + cs / 2 - my);
+      const b = Math.pow(clamp(1 - d / 170), 1.3);
+      if (b > 0) { g.fillStyle = `rgba(200,212,255,${b * 0.35})`; g.fillRect(x, y, cs, cs); }
+    }
+  }
+  for (let i = 0; i < 30; i++) {
+    g.fillStyle = `rgba(255,255,255,${(oled ? 0.95 : 0.5) * (0.6 + 0.4 * Math.sin(t * 3 + i))})`;
+    g.beginPath(); g.arc(20 + hash(i, 1) * (w - 40), 20 + hash(i, 2) * (h - 40), 2.6, 0, Math.PI * 2); g.fill();
+  }
+  g.shadowColor = 'rgba(255,246,220,0.9)'; g.shadowBlur = oled ? 24 : 50;
+  g.fillStyle = '#fbf3dc'; g.beginPath(); g.arc(mx, my, 52, 0, Math.PI * 2); g.fill();
+  g.shadowBlur = 0;
+  g.fillStyle = 'rgba(214,200,170,0.6)';
+  g.beginPath(); g.arc(mx - 15, my - 10, 10, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(mx + 17, my + 15, 7, 0, Math.PI * 2); g.fill();
+}
+
+// ---------- сцена «процессор» ----------
+const chipStage = new THREE.Group();
+scene.add(chipStage);
+const BOARD_Y = 0.6;
+mesh(rbox(3.2, 0.08, 2.4, 0.04), mat('#b9eadb', { roughness: 0.5 }), chipStage, [0, BOARD_Y, 0]);
+const traceM = mat('#8fd6c1', { roughness: 0.5, clearcoat: 0 });
+const TOP = BOARD_Y + 0.045;
+const PATHS = {
+  hdmi: [[-1.45, 0.55], [-0.9, 0.55], [-0.9, 0.15], [-0.5, 0.15]],
+  ram: [[0.15, -0.5], [0.15, -0.75]],
+  out: [[0.5, -0.1], [0.95, -0.1], [0.95, 0.35], [1.45, 0.35]],
+};
+for (const pts of Object.values(PATHS)) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const s = mesh(new THREE.BoxGeometry(x0 === x1 ? 0.05 : len + 0.05, 0.012, z0 === z1 ? 0.05 : len + 0.05), traceM, chipStage, [(x0 + x1) / 2, TOP, (z0 + z1) / 2], false);
+    s.receiveShadow = true;
+  }
+}
+mesh(rbox(1.0, 0.1, 1.0, 0.04), mat('#2a2e39', { roughness: 0.35 }), chipStage, [0, TOP + 0.05, 0]);
+const socTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#dfe3ea'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#1e2433'; g.font = '800 92px Inter, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('SoC', w / 2, h / 2 + 4);
+});
+const lid = mesh(rbox(0.66, 0.04, 0.66, 0.02), mat('#dfe3ea', { metalness: 0.7, roughness: 0.25 }), chipStage, [0, TOP + 0.12, 0]);
+mesh(new THREE.PlaneGeometry(0.5, 0.5), new THREE.MeshStandardMaterial({ map: socTex, roughness: 0.4, metalness: 0.3 }), chipStage, [0, TOP + 0.142, 0], false).rotation.x = -Math.PI / 2;
+const ring = mesh(new THREE.TorusGeometry(0.58, 0.012, 8, 64), new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: P.sun, emissiveIntensity: 1 }), chipStage, [0, TOP + 0.02, 0], false);
+ring.rotation.x = -Math.PI / 2;
+{
+  const pins = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 0.03, 0.1), mat('#e6b94a', { metalness: 0.9, roughness: 0.25 }), 40);
+  const o = new THREE.Object3D();
+  let k = 0;
+  for (let side = 0; side < 4; side++) for (let i = 0; i < 10; i++) {
+    const a = (i - 4.5) * 0.09;
+    const p = [[a, 0.55], [a, -0.55], [0.55, a], [-0.55, a]][side];
+    o.position.set(p[0], TOP + 0.015, p[1]);
+    o.rotation.y = side < 2 ? 0 : Math.PI / 2;
+    o.updateMatrix(); pins.setMatrixAt(k++, o.matrix);
+  }
+  pins.castShadow = true;
+  chipStage.add(pins);
+}
+for (const x of [-0.25, 0.4]) mesh(rbox(0.5, 0.08, 0.28, 0.02), mat('#33384a'), chipStage, [x, TOP + 0.04, -0.92]);
+for (let i = 0; i < 6; i++) {
+  const c = mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.2, 24), mat(i % 2 ? '#ffd58a' : '#9fc7ff'), chipStage, [-1.2 + (i % 3) * 0.2, TOP + 0.1, -0.55 - Math.floor(i / 3) * 0.22]);
+  mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.02, 24), mat('#e6e9ef', { metalness: 0.7 }), c, [0, 0.105, 0], false);
+}
+const hdmi = new THREE.Group();
+hdmi.position.set(-1.62, TOP + 0.09, 0.55);
+mesh(rbox(0.32, 0.18, 0.5, 0.03), mat('#cfd5df', { metalness: 0.8, roughness: 0.25 }), hdmi);
+mesh(rbox(0.06, 0.08, 0.36, 0.01), mat('#1e2433'), hdmi, [-0.14, 0, 0], false);
+chipStage.add(hdmi);
+mesh(rbox(0.12, 0.05, 0.7, 0.02), mat('#f2f2f2'), chipStage, [1.55, TOP + 0.03, 0.35]);
+const cable = mesh(new THREE.BoxGeometry(1.4, 0.01, 0.55), mat('#ffb627', { roughness: 0.5 }), chipStage, [2.3, TOP + 0.02, 0.35]);
+const PULSE_N = 14;
+const pulses = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 16, 12), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), PULSE_N);
+pulses.frustumCulled = false;
+chipStage.add(pulses);
+function along(pts, f) {
+  const segs = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); segs.push(l); total += l; }
+  let d = f * total;
+  for (let i = 0; i < segs.length; i++) {
+    if (d <= segs[i]) { const k = d / segs[i]; return [lerp(pts[i][0], pts[i + 1][0], k), lerp(pts[i][1], pts[i + 1][1], k)]; }
+    d -= segs[i];
+  }
+  return pts[pts.length - 1];
+}
+
+// ---------- тайминг сцен и камера ----------
+const STAGES = [
+  { g: tvStage, a: 0, b: 6.5 },
+  { g: pixStage, a: 6.5, b: 22.5 },
+  { g: layStage, a: 22.5, b: 34.5 },
+  { g: oledStage, a: 34.5, b: 42.5 },
+  { g: chipStage, a: 42.5, b: 50.5 },
+  { g: tvStage, a: 50.5, b: 99 },
+];
+const WIPES = [[6.5, P.lav], [22.5, P.mint], [34.5, P.sky], [42.5, P.sun], [50.5, P.coral]];
+
+// «медленно» — плавный дрейф, «рывок» — быстрый разгон и торможение
+const EASE = {
+  slow: (x) => -(Math.cos(Math.PI * x) - 1) / 2,
+  whip: (x) => (x < 0.5 ? 16 * x ** 5 : 1 - Math.pow(-2 * x + 2, 5) / 2),
+};
+const k = (t, az, el, r, tg, e = 'slow', roll = 0) => ({ t, az, el, r, tg, e, roll });
+const TVT = [0, TV_Y, 0];
+const CAM = [
+  // 1. телевизор целиком
+  k(0, -0.55, 0.1, 10.5, TVT), k(2.0, -0.25, 0.15, 9.6, TVT),
+  k(2.8, 1.45, 0.05, 5.6, TVT, 'whip', 0.08), k(4.2, 1.62, 0.1, 5.3, TVT),
+  k(5.0, 3.55, 0.32, 7.6, [0, TV_Y - 0.1, 0], 'whip', -0.07), k(6.49, 3.75, 0.35, 7.2, [0, TV_Y - 0.1, 0]),
+  // 2. стена пикселей
+  k(6.5, 0.0, 0.05, 9.5, [0, WALL_Y, 0]), k(8.0, 0.22, 0.1, 7.6, [0, WALL_Y, 0]),
+  k(8.8, -0.95, 0.35, 5.0, [0, WALL_Y, 0], 'whip', 0.08), k(10.6, -1.08, 0.42, 4.6, [0, WALL_Y, 0]),
+  k(11.4, 0.55, -0.02, 5.4, [0, WALL_Y, 0.3], 'whip', -0.08), k(12.4, 0.4, 0.04, 5.0, [0, WALL_Y, 0.6]),
+  k(13.8, 0.3, 0.08, 5.8, [0, WALL_Y + 0.5, 1.2]),
+  // 3. субпиксели
+  k(15.2, 0.15, 0.12, 6.6, [0, WALL_Y + 0.8, 1.2]),
+  k(16.0, -1.25, 0.25, 6.4, [0, WALL_Y + 0.8, 1.2], 'whip', 0.1), k(17.6, -1.38, 0.3, 6.3, [0, WALL_Y + 0.8, 1.2]),
+  k(18.3, 0.0, 1.0, 6.4, [0, WALL_Y + 0.6, 1.0], 'whip', -0.06), k(19.6, 0.15, 0.92, 6.4, [0, WALL_Y + 0.6, 1.0]),
+  k(20.3, 0.95, 0.12, 6.6, [0, WALL_Y + 0.8, 1.2], 'whip', 0.09), k(22.49, 1.12, 0.16, 6.8, [0, WALL_Y + 0.8, 1.2]),
+  // 4. слои LCD
+  k(22.5, 0.6, 0.12, 7.8, [0, 1.9, 0]), k(24.6, 0.8, 0.2, 7.6, [0, 2.15, 0]),
+  k(25.4, 2.25, 0.42, 6.6, [0, 2.15, 0], 'whip', -0.08), k(27.4, 2.42, 0.47, 6.4, [0, 2.15, 0]),
+  k(28.2, 0.9, 0.95, 6.4, [0, 2.15, 0], 'whip', 0.06), k(30.0, 0.7, 0.88, 6.4, [0, 2.15, 0]),
+  k(30.8, -0.6, 0.2, 6.8, [0, 2.15, 0], 'whip', 0.08), k(34.49, -0.92, 0.24, 7.0, [0, 2.15, 0]),
+  // 5. OLED vs LCD
+  k(34.5, -0.32, 0.08, 8.6, [0, 2.1, 0]), k(36.2, -0.16, 0.1, 8.1, [0, 2.1, 0]),
+  k(37.0, 1.3, 0.16, 7.6, [0, 2.0, 0], 'whip', 0.08), k(38.8, 1.4, 0.2, 7.4, [0, 2.0, 0]),
+  k(39.6, 0.12, 0.05, 8.0, [0, 2.1, 0], 'whip', -0.07), k(42.49, 0.0, 0.07, 8.2, [0, 2.1, 0]),
+  // 6. процессор
+  k(42.5, 0.45, 0.6, 7.0, [0, 0.7, 0]), k(44.2, 0.65, 0.52, 6.4, [0, 0.7, 0]),
+  k(45.0, 2.05, 0.24, 4.0, [0, 0.75, 0], 'whip', -0.09), k(46.8, 2.25, 0.2, 3.8, [0, 0.75, 0]),
+  k(47.6, 0.2, 1.2, 7.4, [0.3, 0.1, 0.2], 'whip', 0.05), k(50.49, -0.1, 1.14, 7.8, [0.3, 0.1, 0.2]),
+  // 7. финал: полный оборот вокруг телевизора
+  k(50.5, -0.5, 0.12, 11.5, TVT), k(51.6, -0.3, 0.14, 11.0, TVT),
+  k(53.6, Math.PI * 2 - 0.3, 0.16, 11.0, TVT, 'whip', 0.05), k(56, Math.PI * 2 - 0.15, 0.14, 11.4, TVT),
+];
+function rig(t) {
+  let i = 0;
+  while (i < CAM.length - 2 && t >= CAM[i + 1].t) i++;
+  const a = CAM[i], b = CAM[i + 1];
+  const raw = clamp((t - a.t) / (b.t - a.t));
+  const e = EASE[b.e](raw);
+  return {
+    az: lerp(a.az, b.az, e) + Math.sin(t * 0.7) * 0.012,
+    el: lerp(a.el, b.el, e) + Math.sin(t * 0.53) * 0.008,
+    r: lerp(a.r, b.r, e),
+    tg: a.tg.map((v, j) => lerp(v, b.tg[j], e)),
+    roll: b.e === 'whip' ? Math.sin(raw * Math.PI) * b.roll : 0,
+  };
+}
+function placeCamera(t) {
+  const c = rig(t);
+  camera.position.set(
+    c.tg[0] + c.r * Math.cos(c.el) * Math.sin(c.az),
+    c.tg[1] + c.r * Math.sin(c.el),
+    c.tg[2] + c.r * Math.cos(c.el) * Math.cos(c.az),
+  );
+  camera.up.set(0, 1, 0);
+  camera.lookAt(...c.tg);
+  camera.rotateZ(c.roll);
+  camera.updateMatrixWorld();
+}
+// скорость камеры: подписи гаснут на рывках
+function camSpeed(t) {
+  const a = rig(t), b = rig(t - 1 / 30);
+  return Math.abs(a.az - b.az) + Math.abs(a.el - b.el);
+}
+const v3 = new THREE.Vector3();
+function proj(x, y, z) {
+  v3.set(x, y, z).project(camera);
+  return [(v3.x + 1) / 2 * W, (1 - v3.y) / 2 * H, v3.z < 1];
+}
+
+// ---------- анимация объектов ----------
+const O = new THREE.Object3D();
+const MIX_KEYS = [
+  [14.4, null, 'Цвет солнца'],
+  [16.4, [1, 1, 0], 'Жёлтый'],
+  [17.6, [1, 0, 1], 'Пурпурный'],
+  [18.8, [0, 1, 1], 'Голубой'],
+  [20.0, [1, 1, 1], 'Белый'],
+  [21.2, null, 'Цвет солнца'],
+];
+function mixLevels(t) {
+  let lv = baseRGB, name = MIX_KEYS[0][2];
+  for (let i = 1; i < MIX_KEYS.length; i++) {
+    const [kt, kv, kn] = MIX_KEYS[i];
+    if (t >= kt - 0.4) {
+      const prev = MIX_KEYS[i - 1][1] ?? baseRGB;
+      const e = eio(prog(t, kt - 0.4, kt));
+      lv = prev.map((v, j) => lerp(v, (kv ?? baseRGB)[j], e));
+      if (t >= kt - 0.2) name = kn;
+    }
+  }
+  return { lv, name };
+}
+
+function animate(t) {
+  for (const s of STAGES) s.g.visible = false;
+  for (const s of STAGES) if (t >= s.a && t < s.b) s.g.visible = true;
+
+  // телевизор: экран «включается»
+  screenMesh.material.color.setScalar(lerp(0.05, 1, eo(prog(t, 0.4, 1.2))));
+
+  // стена пикселей
+  if (pixStage.visible) {
+    const out = prog(t, 13.0, 14.2);
+    for (let r = 0, i = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++, i++) {
+      const [x, y] = tilePos(c, r);
+      const d = Math.hypot(c - TC.c, r - TC.r);
+      const appear = eback(prog(t, 6.5 + d * 0.06, 7.0 + d * 0.06));
+      const wave = 0.12 * Math.sin(t * 3 - (c + r) * 0.45) * prog(t, 7.5, 8.5) * (1 - prog(t, 11.5, 12.2));
+      let s = appear * (1 - eio(clamp(out * 1.6 - d * 0.06)));
+      if (c === TC.c && r === TC.r) s = t < 12.2 ? appear : 0;
+      O.position.set(x, y, wave);
+      O.rotation.set(0, 0, 0);
+      O.scale.setScalar(Math.max(s, 1e-4));
+      O.updateMatrix();
+      tiles.setMatrixAt(i, O.matrix);
+    }
+    tiles.instanceMatrix.needsUpdate = true;
+
+    // выбранный пиксель выезжает вперёд и растёт, потом распадается на R, G, B
+    const pop = eio(prog(t, 12.2, 13.6));
+    const split = eio(prog(t, 14.2, 15.0));
+    const [tx, ty] = tilePos(TC.c, TC.r);
+    bigTile.visible = t >= 12.2 && split < 1;
+    bigTile.position.set(lerp(tx, 0, pop), lerp(ty, WALL_Y + 0.1, pop), lerp(0, 1.2, pop));
+    bigTile.scale.set(lerp(1, 2.8, pop) * (1 - split), lerp(1, 2.8, pop), lerp(1, 2.8, pop));
+    bigTile.rotation.y = pop * Math.PI * 2;
+    const { lv } = mixLevels(t);
+    const tall = eio(prog(t, 15.0, 15.8));
+    bars.forEach((b, i) => {
+      b.m.visible = split > 0;
+      b.m.position.set(lerp(0, (i - 1) * 0.42, split), WALL_Y + 0.1 + lerp(0, 0.3, tall), 1.2);
+      b.m.scale.set(lerp(0.33, 1, split), lerp(0.86, 1.6, tall), 1);
+      const level = lerp(baseRGB[i], lv[i], 1);
+      b.m.material.emissiveIntensity = split * (0.05 + 0.55 * level);
+      b.m.material.color.copy(b.c).multiplyScalar(lerp(1, 0.18 + 0.82 * level, split));
+      b.light.position.set(b.m.position.x, WALL_Y + 0.4, 1.6);
+      b.light.intensity = split * level * 3;
+    });
+    const me = eback(prog(t, 15.4, 16.0));
+    mixBall.visible = me > 0;
+    mixBall.position.set(0, WALL_Y + 1.85 + Math.sin(t * 2) * 0.04, 1.2);
+    mixBall.scale.setScalar(Math.max(me, 1e-4));
+    mixBall.material.color.setRGB(...lv, THREE.SRGBColorSpace);
+    mixBall.material.emissive.setRGB(...lv, THREE.SRGBColorSpace);
+  }
+
+  // слои LCD
+  if (layStage.visible) {
+    const gap = lerp(0.09, 0.5, eio(prog(t, 23.2, 24.6)));
+    slabs.forEach((s, i) => {
+      const e = eback(prog(t, 22.6 + i * 0.12, 23.1 + i * 0.12));
+      s.position.set(0, 0.5 + i * gap + (1 - clamp(e)) * 1.2, 0);
+      s.scale.setScalar(Math.max(e, 1e-4));
+      s.rotation.y = (1 - clamp(e)) * 0.6;
+    });
+    let n = 0;
+    for (let x = 0; x < 12; x++) for (let z = 0; z < 7; z++) {
+      O.position.set((x - 5.5) * 0.2, 0.05, (z - 3) * 0.2);
+      O.rotation.set(Math.PI / 2, 0, Math.sin(t * 2.2 + x * 0.4 + z * 0.6) * 1.3);
+      O.scale.setScalar(1);
+      O.updateMatrix(); rods.setMatrixAt(n++, O.matrix);
+    }
+    rods.instanceMatrix.needsUpdate = true;
+    const on = prog(t, 25.3, 25.7) * (1 - prog(t, 34.0, 34.4));
+    const span = 5 * gap + 1.2;
+    const col = new THREE.Color();
+    PH.forEach((p, i) => {
+      const age = t - 25.4 - p.phase * 1.6;
+      let h = age < 0 ? -1 : (age * 1.1) % span;
+      let s = on * (h >= 0 ? 1 : 0);
+      if (p.blocked && h > 3 * gap + 0.05) s = 0;
+      if (h > 5 * gap) s *= clamp(1 - (h - 5 * gap) / 0.6);
+      O.position.set(p.x, 0.55 + Math.max(h, 0), p.z);
+      O.rotation.set(0, 0, 0);
+      O.scale.setScalar(Math.max(s, 1e-4));
+      O.updateMatrix(); photons.setMatrixAt(i, O.matrix);
+      col.set(h > 4 * gap + 0.05 ? [P.R, P.G, P.B][p.ch] : '#fffbe8');
+      photons.setColorAt(i, col);
+    });
+    photons.instanceMatrix.needsUpdate = true;
+    photons.instanceColor.needsUpdate = true;
+  }
+
+  // OLED / LCD
+  if (oledStage.visible) {
+    drawNight(lcdC, t, false); lcdTex.needsUpdate = true;
+    drawNight(oledC, t, true); oledTex.needsUpdate = true;
+    const e1 = eback(prog(t, 34.6, 35.3)), e2 = eback(prog(t, 34.9, 35.6));
+    lcdPanel.scale.setScalar(Math.max(e1, 1e-4));
+    oledPanel.scale.setScalar(Math.max(e2, 1e-4));
+    lcdPanel.rotation.y = (1 - clamp(e1)) * -0.8;
+    oledPanel.rotation.y = (1 - clamp(e2)) * 0.8;
+  }
+
+  // процессор: импульсы бегут по дорожкам
+  if (chipStage.visible) {
+    ring.material.emissiveIntensity = 0.8 + 0.7 * Math.sin(t * 6);
+    const on = prog(t, 43.2, 43.6);
+    const col = new THREE.Color();
+    for (let i = 0; i < PULSE_N; i++) {
+      const route = i < 5 ? PATHS.hdmi : i < 7 ? PATHS.ram : PATHS.out;
+      const f = (t * (i < 5 ? 0.7 : 0.9) + i * 0.21) % 1;
+      const [x, z] = along(route, f);
+      O.position.set(x, TOP + 0.04, z);
+      O.scale.setScalar(Math.max(on * Math.sin(f * Math.PI) * 1.2, 1e-4));
+      O.updateMatrix(); pulses.setMatrixAt(i, O.matrix);
+      col.set(i < 5 ? P.sky : i < 7 ? P.lav : [P.R, P.G, P.B, P.sun][i % 4]);
+      pulses.setColorAt(i, col);
+    }
+    pulses.instanceMatrix.needsUpdate = true;
+    pulses.instanceColor.needsUpdate = true;
+    const lift = eback(prog(t, 42.7, 43.4));
+    chipStage.position.y = (1 - clamp(lift)) * -0.6;
+    chipStage.scale.setScalar(Math.max(lift, 1e-4));
+  } else {
+    chipStage.position.y = 0;
+  }
+
+  // телевизор в финале медленно вращает экран к зрителю
+  if (tvStage.visible && t >= 50.5) {
+    tv.position.y = TV_Y + Math.sin(t * 1.5) * 0.02;
+  }
+}
+
+// ---------- 2D-слой: тексты и подписи ----------
+const ui = document.getElementById('ui').getContext('2d');
+const FH = "'Inter Display','Inter','Segoe UI',Arial,sans-serif";
+const FB = "'Inter','Segoe UI',Arial,sans-serif";
+
+function txt(s, x, y, o = {}) {
+  const { size = 48, weight = 700, color = P.ink, align = 'center', alpha = 1, font = FH, lh = 1.16, spacing = 0, shadow = 0 } = o;
+  if (alpha <= 0.001) return;
+  ui.save();
+  ui.globalAlpha *= alpha;
+  ui.font = `${weight} ${size}px ${font}`;
+  ui.textAlign = align; ui.textBaseline = 'middle';
+  ui.fillStyle = color;
+  if (spacing) ui.letterSpacing = spacing + 'px';
+  if (shadow) { ui.shadowColor = 'rgba(255,250,242,0.95)'; ui.shadowBlur = shadow; }
+  String(s).split('\n').forEach((l, i) => ui.fillText(l, x, y + i * size * lh));
+  ui.restore();
+}
+function grad(x0, x1, stops) {
+  const g = ui.createLinearGradient(x0, 0, x1, 0);
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+  return g;
+}
+function card(x, y, w, h, r, alpha, fill = 'rgba(255,255,255,0.92)') {
+  if (alpha <= 0) return;
+  ui.save();
+  ui.globalAlpha *= alpha;
+  ui.shadowColor = 'rgba(60,50,90,0.16)'; ui.shadowBlur = 30; ui.shadowOffsetY = 8;
+  ui.beginPath(); ui.roundRect(x, y, w, h, r);
+  ui.fillStyle = fill; ui.fill();
+  ui.restore();
+}
+function headline(l1, l2, t, t0, a, c2 = grad(240, 840, [P.coral, P.lav])) {
+  const e1 = reveal(t, t0), e2 = reveal(t, t0 + 0.2);
+  txt(l1, 540, 330 + (1 - e1) * 36, { size: 64, weight: 800, alpha: e1 * a, shadow: 24 });
+  txt(l2, 540, 410 + (1 - e2) * 36, { size: 64, weight: 800, alpha: e2 * a, color: c2, shadow: 24 });
+}
+function caption(s, t, a, b, y = 1440) {
+  const al = vis(t, a, b, 0.3, 0.25);
+  if (al <= 0) return;
+  const e = reveal(t, a, 0.4);
+  ui.save();
+  ui.font = `700 38px ${FB}`;
+  const lines = s.split('\n');
+  const w = Math.max(...lines.map((l) => ui.measureText(l).width)) + 80;
+  ui.restore();
+  const h = 44 * lines.length + 40;
+  card(540 - w / 2, y - h / 2 + (1 - e) * 20, w, h, 28, al);
+  txt(s, 540, y - (lines.length - 1) * 22 + (1 - e) * 20, { size: 38, weight: 700, alpha: al, font: FB, lh: 1.16 });
+}
+// подпись-«выноска», привязанная к точке в 3D
+function callout(s, px, py, lx, ly, alpha, color = P.ink, dot = P.coral) {
+  if (alpha <= 0.01 || px < 30 || px > W - 30 || py < 30 || py > H - 30) return;
+  ui.save();
+  ui.globalAlpha *= alpha;
+  ui.strokeStyle = 'rgba(30,36,51,0.45)'; ui.lineWidth = 2.5;
+  ui.beginPath(); ui.moveTo(px, py); ui.lineTo(lx, ly); ui.stroke();
+  ui.fillStyle = '#fff'; ui.beginPath(); ui.arc(px, py, 11, 0, Math.PI * 2); ui.fill();
+  ui.fillStyle = dot; ui.beginPath(); ui.arc(px, py, 7, 0, Math.PI * 2); ui.fill();
+  ui.font = `700 32px ${FB}`;
+  const lines = s.split('\n');
+  const w = Math.max(...lines.map((l) => ui.measureText(l).width)) + 44;
+  const h = 38 * lines.length + 22;
+  ui.restore();
+  const left = lx < px;
+  const bx = left ? lx - w : lx;
+  card(bx, ly - h / 2, w, h, 20, alpha);
+  txt(s, bx + w / 2, ly - (lines.length - 1) * 19, { size: 32, weight: 700, alpha, color, font: FB, lh: 1.19 });
+}
+function drawNum(str, cx, y, size, color, alpha) {
+  const adv = (ch) => (ch === ' ' ? size * 0.28 : size * 0.62);
+  const total = [...str].reduce((s, ch) => s + adv(ch), 0);
+  let x = cx - total / 2;
+  for (const ch of str) { txt(ch, x + adv(ch) / 2, y, { size, weight: 800, color, alpha, shadow: 20 }); x += adv(ch); }
+}
+const fmt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+const CHAPTERS = [
+  [6.6, 14.3, '01', 'ПИКСЕЛИ', P.lav], [14.3, 22.5, '02', 'СУБПИКСЕЛИ', P.coral], [22.6, 34.5, '03', 'МАТРИЦА', P.mint],
+  [34.6, 42.5, '04', 'OLED', P.sky], [42.6, 50.5, '05', 'ПРОЦЕССОР', P.sun],
+];
+function chapterTag(t) {
+  for (const [a, b, num, name, col] of CHAPTERS) {
+    const al = vis(t, a, b, 0.35, 0.3);
+    if (al <= 0) continue;
+    const dx = (1 - eo(prog(t, a, a + 0.5))) * -30;
+    ui.save();
+    ui.font = `700 28px ${FB}`; ui.letterSpacing = '4px';
+    const w = ui.measureText(name).width + 118;
+    ui.restore();
+    card(70 + dx, 212, w, 58, 29, al);
+    ui.save(); ui.globalAlpha = al; ui.fillStyle = col;
+    ui.beginPath(); ui.arc(108 + dx, 241, 20, 0, Math.PI * 2); ui.fill(); ui.restore();
+    txt(num, 108 + dx, 242, { size: 22, weight: 800, color: '#fff', alpha: al, font: FB });
+    txt(name, 142 + dx, 242, { size: 28, weight: 700, align: 'left', alpha: al, font: FB, spacing: 4 });
+  }
+}
+
+function wipe(t) {
+  for (const [T, color] of WIPES) {
+    if (t < T - 0.45 || t > T + 0.45) continue;
+    const R = Math.hypot(W, H) / 2 + 40;
+    ui.save();
+    ui.fillStyle = color;
+    if (t < T) {
+      const r = R * eio(prog(t, T - 0.45, T));
+      ui.beginPath(); ui.arc(540, 960, r, 0, Math.PI * 2); ui.fill();
+    } else {
+      const r = R * eio(prog(t, T, T + 0.45));
+      ui.beginPath(); ui.rect(0, 0, W, H); ui.arc(540, 960, r, 0, Math.PI * 2, true); ui.fill('evenodd');
+    }
+    ui.restore();
+  }
+}
+
+function overlay(t) {
+  ui.clearRect(0, 0, W, H);
+  const lab = 1 - clamp((camSpeed(t) - 0.012) / 0.03);
+
+  // 1. вступление
+  if (t < 6.5) {
+    const a = 1 - prog(t, 5.9, 6.3);
+    headline('Как устроен', 'современный телевизор?', t, 0.3, a);
+    const [px, py] = proj(-1.6, TV_Y + 0.4, 0);
+    callout('Толщина — около 2,5 см', px, py, 560, 1330, vis(t, 3.1, 4.6, 0.3, 0.3) * lab, P.ink, P.sky);
+    const [bx, by] = proj(0.6, TV_Y - 0.1, -0.2);
+    callout('Сзади — блок питания\nи процессор', bx, by, 540, 1390, vis(t, 5.3, 6.4, 0.3, 0.3) * lab, P.ink, P.sun);
+    caption('Покрутим и разберём по деталям', t, 1.2, 2.7);
+  }
+
+  // 2. пиксели
+  if (t >= 6.5 && t < 14.4) {
+    const a = 1 - prog(t, 11.2, 11.6);
+    headline('Экран — это мозаика', 'из крошечных пикселей', t, 6.9, a, grad(240, 840, [P.lav, P.sky]));
+    const cA = reveal(t, 7.6) * (1 - prog(t, 11.2, 11.6));
+    card(270, 1335, 540, 190, 36, cA);
+    drawNum(fmt(8294400 * eio(prog(t, 7.7, 10.2))), 540, 1405, 92, P.ink, cA);
+    txt('пикселей в 4K', 540, 1475, { size: 34, weight: 600, color: P.sub, alpha: cA, font: FB });
+    headline('Достанем', 'один пиксель', t, 11.6, 1 - prog(t, 13.9, 14.3), grad(340, 740, [P.sun, P.coral]));
+  }
+
+  // 3. субпиксели
+  if (t >= 14.3 && t < 22.5) {
+    const a = 1 - prog(t, 22.1, 22.5);
+    headline('В каждом пикселе —', '3 лампочки R · G · B', t, 14.4, a, grad(300, 780, [P.R, P.G, P.B]));
+    const { lv, name } = mixLevels(t);
+    const la = prog(t, 15.6, 16.0) * lab * a;
+    bars.forEach((b, i) => {
+      const [px, py] = proj(b.m.position.x, b.m.position.y + 0.95, b.m.position.z);
+      const s = Math.round(lv[i] * 100) + '%';
+      card(px - 62, py - 70, 124, 56, 28, la);
+      txt(s, px, py - 41, { size: 30, weight: 800, alpha: la, font: FB, color: [P.R, P.G, P.B][i] });
+    });
+    const me = reveal(t, 16.0) * a;
+    card(250, 1370, 580, 120, 60, me);
+    ui.save(); ui.globalAlpha = me;
+    ui.fillStyle = `rgb(${lv.map((v) => v * 255 | 0).join(',')})`;
+    ui.beginPath(); ui.arc(320, 1430, 36, 0, Math.PI * 2); ui.fill();
+    ui.strokeStyle = 'rgba(30,36,51,0.15)'; ui.lineWidth = 3; ui.stroke();
+    ui.restore();
+    txt('= ' + name, 380, 1431, { size: 48, weight: 800, align: 'left', alpha: me });
+  }
+
+  // 4. слои
+  if (t >= 22.5 && t < 34.5) {
+    const a = 1 - prog(t, 34.0, 34.4);
+    headline('Внутри LCD-экрана —', '6 слоёв, как бутерброд', t, 22.8, a, grad(240, 840, [P.mint, P.sky]));
+    const steps = [[25.5, 0], [27.4, 3], [29.4, 4], [31.4, -1]];
+    let active = null;
+    for (const [st, idx] of steps) if (t >= st) active = idx;
+    const la = prog(t, 24.4, 24.9) * lab * a;
+    const pts = slabs.map((s, i) => {
+      const [px, py] = proj(-SW / 2 + 0.1, s.position.y, SD / 2 - 0.1);
+      return { i, px, py, ly: py };
+    });
+    const order = [...pts].sort((p, q) => p.ly - q.ly);
+    order[0].ly = Math.max(order[0].ly, 560);
+    for (let j = 1; j < order.length; j++) order[j].ly = Math.max(order[j].ly, order[j - 1].ly + 74);
+    const over = order[order.length - 1].ly - 1320;
+    if (over > 0) for (const p of order) p.ly -= over;
+    for (const p of pts) {
+      const hi = active === p.i || active === -1;
+      const alpha = la * (active === null || hi ? 1 : 0.55);
+      callout(slabDefs[p.i].name, p.px, p.py, 380, p.ly, alpha, hi ? P.ink : P.sub, [P.sun, '#c9c9c9', P.lav, P.mint, P.coral, P.sky][p.i]);
+    }
+    caption('Свет идёт снизу вверх', t, 24.0, 25.4);
+    caption('1. Светодиоды светят белым', t, 25.5, 27.3);
+    caption('2. Кристаллы поворачиваются\nи дозируют свет', t, 27.4, 29.3);
+    caption('3. Фильтр красит свет\nв красный, зелёный и синий', t, 29.4, 31.3);
+    caption('QLED — то же самое, но с квантовыми\nточками для более сочных цветов', t, 31.4, 34.4);
+  }
+
+  // 5. OLED
+  if (t >= 34.5 && t < 42.5) {
+    const a = 1 - prog(t, 42.1, 42.5);
+    headline('OLED: каждый пиксель', 'светится сам', t, 34.8, a, grad(340, 740, [P.sky, P.lav]));
+    const fa = prog(t, 35.6, 36.0) * lab * a * clamp(1 - (Math.abs(rig(t).az) - 0.35) / 0.3);
+    const [lx, ly] = proj(-1.25, 2.75 + 0.72, 0.07);
+    const [ox, oy] = proj(-1.25, 1.0 + 0.72, 0.02);
+    for (const [s, x, y, c] of [['LCD', lx, ly, P.ink], ['OLED', ox, oy, P.sky]]) {
+      card(x - 10, y - 74, s.length * 30 + 44, 60, 30, fa);
+      txt(s, x + 12, y - 43, { size: 34, weight: 800, align: 'left', alpha: fa, color: c });
+    }
+    const [sx, sy] = proj(0, 2.75, -0.06);
+    callout('У LCD сзади\nсветящая подсветка', sx, sy, 600, 1260, vis(t, 37.6, 39.4, 0.3, 0.3) * lab, P.ink, P.sun);
+    caption('LCD: чёрный — сероватый, вокруг луны ореол\nOLED: выключенный пиксель = идеальный чёрный', t, 39.9, 42.4, 1450);
+  }
+
+  // 6. процессор
+  if (t >= 42.5 && t < 50.5) {
+    const a = 1 - prog(t, 50.1, 50.5);
+    headline('Процессор —', 'мозг телевизора', t, 42.8, a, grad(340, 740, [P.sun, P.coral]));
+    const la = lab * a;
+    const [hx, hy] = proj(-1.62, TOP + 0.1, 0.55);
+    callout('Вход HDMI', hx, hy, Math.max(hx - 60, 300), Math.min(hy + 170, 1300), vis(t, 43.8, 44.8, 0.3, 0.3) * la, P.ink, P.sky);
+    const [cx, cy] = proj(0, TOP + 0.15, 0);
+    callout('Процессор SoC', cx, cy, 760, Math.min(cy - 210, 1200), vis(t, 46.0, 47.5, 0.3, 0.3) * la, P.ink, P.sun);
+    const [rx, ry] = proj(1.45, TOP + 0.05, 0.35);
+    callout('Шлейф к экрану', rx, ry, Math.min(rx + 40, 760), Math.min(ry + 170, 1220), vis(t, 48.3, 50.2, 0.3, 0.3) * la, P.ink, P.coral);
+    const items = ['Распаковывает видео', 'Повышает чёткость', 'Дорисовывает кадры', 'Готовит 120 кадров в секунду'];
+    const ia = vis(t, 44.0, 50.4, 0.3, 0.3);
+    const shown = items.filter((_, i) => t >= 44.0 + i * 1.3).length;
+    card(150, 1300, 780, 70 + 56 * Math.max(shown, 1), 32, ia);
+    items.forEach((s, i) => {
+      const e = reveal(t, 44.0 + i * 1.3, 0.45) * ia;
+      ui.save(); ui.globalAlpha = e; ui.fillStyle = [P.sky, P.lav, P.mint, P.coral][i];
+      ui.beginPath(); ui.arc(205, 1355 + i * 56, 10, 0, Math.PI * 2); ui.fill(); ui.restore();
+      txt(s, 235 + (1 - e) * 20, 1356 + i * 56, { size: 34, weight: 700, align: 'left', alpha: e, font: FB });
+    });
+  }
+
+  // 7. финал
+  if (t >= 50.5) {
+    const e0 = reveal(t, 50.9);
+    txt('Каждую секунду экран делает', 540, 330 + (1 - e0) * 30, { size: 44, weight: 700, color: P.sub, alpha: e0, shadow: 20 });
+    const pe = eback(prog(t, 51.3, 51.9));
+    if (pe > 0) {
+      ui.save(); ui.translate(540, 450); ui.scale(pe, pe);
+      txt('≈ 3 млрд', 0, 0, { size: 130, weight: 900, color: grad(-300, 300, [P.coral, P.lav, P.sky]), shadow: 24 });
+      ui.restore();
+    }
+    const e1 = reveal(t, 51.8);
+    txt('вспышек субпикселей', 540, 560 + (1 - e1) * 30, { size: 46, weight: 700, alpha: e1, shadow: 20 });
+    const e2 = reveal(t, 52.4);
+    card(165, 1290, 750, 76, 38, e2);
+    txt('8,3 млн пикселей × 3 цвета × 120 Гц', 540, 1329, { size: 34, weight: 700, color: P.sub, alpha: e2, font: FB });
+    const be = reveal(t, 53.4);
+    if (be > 0) {
+      const pulse = 1 + 0.03 * Math.sin(t * 7);
+      ui.save(); ui.globalAlpha = be; ui.translate(540, 1450 + (1 - be) * 30); ui.scale(pulse, pulse);
+      ui.shadowColor = 'rgba(255,107,107,0.45)'; ui.shadowBlur = 30; ui.shadowOffsetY = 8;
+      ui.beginPath(); ui.roundRect(-300, -48, 600, 96, 48);
+      ui.fillStyle = grad(-300, 300, [P.coral, P.pink]); ui.fill();
+      ui.restore();
+      txt('Подпишись — разберём ещё', 540, 1451 + (1 - be) * 30, { size: 36, weight: 800, color: '#fff', alpha: be, font: FB });
+    }
+  }
+
+  chapterTag(t);
+  wipe(t);
+}
+
+function renderAt(t) {
+  animate(t);
+  placeCamera(t);
+  renderer.render(scene, camera);
+  overlay(t);
+}
+window.renderAt = renderAt;
+
+await document.fonts.load(`800 60px ${FH}`);
+await document.fonts.load(`700 40px ${FB}`);
+renderAt(0);
+window.READY = true;
+if (!location.search.includes('render')) {
+  const fit = () => { document.getElementById('stage').style.transform = `scale(${Math.min(innerWidth / W, innerHeight / H)})`; };
+  fit(); addEventListener('resize', fit);
+  const start = performance.now();
+  const loop = () => { renderAt(((performance.now() - start) / 1000) % VIDEO.duration); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
