@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Телевизор в разрезе</title>
+<style>
+  html, body { margin: 0; background: #e9ecef; overflow: hidden; }
+  #stage { position: relative; width: 1080px; height: 1920px; transform-origin: 0 0; }
+  #stage canvas { position: absolute; left: 0; top: 0; display: block; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "../node_modules/three/build/three.module.js",
+  "three/addons/": "../node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="stage"><canvas id="ui" width="1080" height="1920"></canvas></div>
+<script type="module">
+// Ролик в стиле технических 3D-иллюстраций «в разрезе»: одна модель телевизора,
+// рентгеновский корпус, вырезанный угол матрицы со слоями, выноски с номерами.
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+window.VIDEO = { width: 1080, height: 1920, fps: 30, duration: 56 };
+const W = 1080, H = 1920;
+
+const P = {
+  ink: '#1f2a37', body: '#4b5563', accent: '#e8663d', bg: '#e9ecef',
+  R: '#e5484d', G: '#30a46c', B: '#3e63dd', signal: '#2f8cff', power: '#ffb224',
+};
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const vis = (t, a, b, fi = 0.4, fo = 0.4) => Math.min(prog(t, a, a + fi), 1 - prog(t, b - fo, b));
+const reveal = (t, t0, d = 0.5) => eo(prog(t, t0, t0 + d));
+function hash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+// ---------- рендерер и студийный свет ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true;
+document.getElementById('stage').prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+{
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 1024;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 1024);
+  gr.addColorStop(0, '#f4f6f8'); gr.addColorStop(0.6, '#e8ebee'); gr.addColorStop(1, '#d9dee3');
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 1024);
+  const rg = g.createRadialGradient(256, 420, 50, 256, 420, 700);
+  rg.addColorStop(0, 'rgba(255,255,255,0.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 512, 1024);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.9;
+scene.add(new THREE.HemisphereLight('#ffffff', '#d5d9de', 0.9));
+const key = new THREE.DirectionalLight('#ffffff', 2.2);
+key.position.set(5, 9, 7);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 30 });
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
+scene.add(key);
+const rim = new THREE.DirectionalLight('#dfe8ff', 0.9);
+rim.position.set(-6, 4, -6);
+scene.add(rim);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.16 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+const camera = new THREE.PerspectiveCamera(38, W / H, 0.15, 60);
+
+// ---------- материалы и помощники ----------
+const phys = (color, o = {}) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.45, metalness: 0, ...o });
+const M = {
+  alu: phys('#c9ced4', { metalness: 1, roughness: 0.3 }),
+  dark: phys('#2a2d33', { roughness: 0.5, clearcoat: 0.3 }),
+  cover: phys('#3b3f46', { roughness: 0.6, transparent: true }),
+  glass: phys('#101216', { roughness: 0.06, clearcoat: 1, metalness: 0.2 }),
+  chip: phys('#1d1f23', { roughness: 0.35, clearcoat: 0.4 }),
+  copper: phys('#c4773b', { metalness: 1, roughness: 0.3 }),
+  steel: phys('#9ba2aa', { metalness: 0.9, roughness: 0.4 }),
+  ffc: phys('#e39b2d', { roughness: 0.45 }),
+  white: phys('#eef0f2', { roughness: 0.5 }),
+  tape: phys('#f2c14e', { roughness: 0.6 }),
+  capBody: phys('#22324d', { roughness: 0.35, clearcoat: 0.6 }),
+};
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+const rbox = (w, h, d, r = 0.01) => new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2 - 1e-4, h / 2 - 1e-4, d / 2 - 1e-4));
+function mesh(geo, material, parent, pos = [0, 0, 0], shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(...pos);
+  m.castShadow = shadow; m.receiveShadow = shadow;
+  parent.add(m);
+  return m;
+}
+// зелёная плата с дорожками
+const pcbMat = (seed) => phys('#ffffff', {
+  roughness: 0.45, clearcoat: 0.5,
+  map: canvasTex(512, 512, (g, w, h) => {
+    g.fillStyle = '#23744a'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#4fae78'; g.lineWidth = 3;
+    for (let i = 0; i < 60; i++) {
+      let x = hash(i, seed) * w, y = hash(seed, i) * h;
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < 3; k++) {
+        if ((i + k) % 2) x += (hash(i, k + seed) - 0.5) * 240; else y += (hash(k + seed, i) - 0.5) * 240;
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    g.fillStyle = '#d6b45a';
+    for (let i = 0; i < 90; i++) g.fillRect(hash(i, seed + 9) * w, hash(seed + 9, i) * h, 7, 7);
+  }),
+});
+
+// ---------- картинка на экране ----------
+function drawArt(g, w, h) {
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.7);
+  sky.addColorStop(0, '#5aa9e6'); sky.addColorStop(0.65, '#a9d4f5'); sky.addColorStop(1, '#f7dcc0');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  const sx = w * 0.7, sy = h * 0.34, sr = h * 0.1;
+  const glow = g.createRadialGradient(sx, sy, sr * 0.8, sx, sy, sr * 3);
+  glow.addColorStop(0, 'rgba(255,220,140,0.9)'); glow.addColorStop(1, 'rgba(255,220,140,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffd35a'; g.beginPath(); g.arc(sx, sy, sr, 0, Math.PI * 2); g.fill();
+  const hill = (y0, amp, f, ph, c) => {
+    g.fillStyle = c; g.beginPath(); g.moveTo(0, h);
+    for (let x = 0; x <= w; x += 8) g.lineTo(x, y0 * h + Math.sin(x / w * f + ph) * amp * h);
+    g.lineTo(w, h); g.fill();
+  };
+  hill(0.6, 0.07, 4.5, 0.6, '#8fb8c9');
+  hill(0.68, 0.05, 6, 2.0, '#6fae7d');
+  hill(0.8, 0.05, 3, 4.0, '#3f8f5b');
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  for (const [cx, cy] of [[0.2, 0.18], [0.45, 0.1]]) for (const [dx, dy, r] of [[0, 0, 30], [32, 8, 22], [-30, 9, 20]]) {
+    g.beginPath(); g.arc(cx * w + dx, cy * h + dy, r, 0, Math.PI * 2); g.fill();
+  }
+}
+const ART = document.createElement('canvas');
+ART.width = 1024; ART.height = 576;
+drawArt(ART.getContext('2d'), 1024, 576);
+const artTex = new THREE.CanvasTexture(ART);
+artTex.colorSpace = THREE.SRGBColorSpace;
+
+// ---------- телевизор ----------
+const TVY = 1.6;
+const PW = 3.1, PH = 1.75;
+const tvStage = new THREE.Group();
+scene.add(tvStage);
+const tv = new THREE.Group();
+tv.position.y = TVY;
+tvStage.add(tv);
+
+// плоскости разреза: убираем угол x > X0, y > Y0 (мировые координаты)
+const cutX = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 99);
+const cutY = new THREE.Plane(new THREE.Vector3(0, -1, 0), 99);
+const CUT = { cx: 0.65, cy: 0.3 }; // угол разреза в координатах ТВ
+function clipWithCap(m, capColor) {
+  m.material = m.material.clone();
+  m.material.clippingPlanes = [cutX, cutY];
+  m.material.clipIntersection = true;
+  m.material.side = THREE.FrontSide;
+  // задние грани внутри разреза закрашиваем плоским цветом — выглядит как срез
+  const cap = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
+    color: capColor, side: THREE.BackSide, clippingPlanes: [cutX, cutY], clipIntersection: true, toneMapped: false,
+  }));
+  m.add(cap);
+  return m;
+}
+
+// слои матрицы: спереди назад (толщины преувеличены для наглядности)
+const LAYERS = [
+  { name: 'Стекло и поляризатор', t: 0.016, z: 0.062, mat: M.glass, cap: '#4a5563' },
+  { name: 'Цветной фильтр RGB', t: 0.01, z: 0.049, mat: phys('#d9d4cf'), cap: '#e5484d' },
+  { name: 'Жидкие кристаллы', t: 0.008, z: 0.04, mat: phys('#bfe6dc', { transparent: true, opacity: 0.8 }), cap: '#30a46c' },
+  { name: 'Стекло с транзисторами', t: 0.014, z: 0.029, mat: phys('#c9d8e6', { roughness: 0.1 }), cap: '#7aa2c8' },
+  { name: 'Задний поляризатор', t: 0.008, z: 0.018, mat: phys('#b9b3e6'), cap: '#7b6fd6' },
+  { name: 'Рассеивающие плёнки', t: 0.014, z: 0.007, mat: phys('#f6f6f4', { roughness: 0.9 }), cap: '#f1f1ef' },
+  { name: 'Светодиодная подсветка', t: 0.018, z: -0.009, mat: M.white, cap: '#f2c14e' },
+  { name: 'Металлическое шасси', t: 0.016, z: -0.026, mat: M.steel, cap: '#9ba2aa' },
+];
+LAYERS.forEach((L) => clipWithCap(mesh(new THREE.BoxGeometry(PW, PH, L.t), L.mat, tv, [0, 0, L.z]), L.cap));
+const screen = clipWithCap(mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshBasicMaterial({ map: artTex, toneMapped: false }), tv, [0, 0, 0.0705], false), '#4a5563');
+screen.children[0].visible = false;
+// алюминиевая рамка
+for (const [w, h, x, y] of [[PW + 0.06, 0.03, 0, PH / 2 + 0.015], [PW + 0.06, 0.03, 0, -PH / 2 - 0.015], [0.03, PH, PW / 2 + 0.015, 0], [0.03, PH, -PW / 2 - 0.015, 0]]) {
+  clipWithCap(mesh(new THREE.BoxGeometry(w, h, 0.11), M.alu, tv, [x, y, 0.017]), '#aab1b8');
+}
+// задняя крышка (станет «рентгеновской»)
+const coverParts = [];
+for (const [geo, pos] of [
+  [rbox(PW, PH, 0.03, 0.012), [0, 0, -0.05]],
+  [rbox(2.3, 1.2, 0.13, 0.04), [0, -0.12, -0.13]],
+]) {
+  const m = mesh(geo, M.cover, tv, pos);
+  clipWithCap(m, '#2a2d33');
+  m.material.depthWrite = true;
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), new THREE.LineBasicMaterial({ color: '#5b6672', transparent: true, opacity: 0 }));
+  m.add(edges);
+  coverParts.push({ m, edges });
+}
+// подставка
+mesh(rbox(0.16, 0.8, 0.06, 0.02), M.alu, tvStage, [0, 0.42, -0.17]);
+mesh(rbox(1.3, 0.035, 0.5, 0.015), M.alu, tvStage, [0, 0.018, -0.12]);
+
+// электроника на шасси (сзади, смотрит в -z)
+const BZ = -0.075; // плоскость плат
+function board(cx, cy, w, h, seed) {
+  const g = new THREE.Group();
+  g.position.set(cx, cy, BZ);
+  mesh(new THREE.BoxGeometry(w, h, 0.012), pcbMat(seed), g);
+  tv.add(g);
+  return g;
+}
+function fins(parent, x, y, w, h, n, depth) {
+  for (let i = 0; i < n; i++) mesh(new THREE.BoxGeometry(w / n * 0.45, h, depth), M.alu, parent, [x - w / 2 + (i + 0.5) * w / n, y, -0.006 - depth / 2]);
+  mesh(new THREE.BoxGeometry(w, h, 0.01), M.alu, parent, [x, y, -0.011]);
+}
+const psu = board(-0.62, -0.14, 0.8, 0.62, 3);
+for (const [x, y, r, l] of [[-0.25, 0.14, 0.055, 0.13], [-0.12, 0.14, 0.055, 0.13], [-0.25, -0.02, 0.04, 0.09], [0.05, -0.2, 0.03, 0.06], [0.14, -0.2, 0.03, 0.06]]) {
+  const c = mesh(new THREE.CylinderGeometry(r, r, l, 24), M.capBody, psu, [x, y, -0.006 - l / 2]);
+  c.rotation.x = Math.PI / 2;
+  mesh(new THREE.CylinderGeometry(r * 1.01, r * 1.01, 0.006, 24), M.steel, c, [0, l / 2, 0], false);
+}
+const transformer = new THREE.Group();
+transformer.position.set(0.08, 0.08, -0.06);
+mesh(new THREE.BoxGeometry(0.18, 0.15, 0.1), M.tape, transformer);
+mesh(new THREE.BoxGeometry(0.2, 0.06, 0.11), M.dark, transformer, [0, 0.07, 0]);
+mesh(new THREE.BoxGeometry(0.2, 0.06, 0.11), M.dark, transformer, [0, -0.07, 0]);
+psu.add(transformer);
+fins(psu, 0.26, -0.05, 0.16, 0.42, 7, 0.07);
+for (const [x, y] of [[-0.28, -0.2], [-0.18, -0.2]]) {
+  const coil = mesh(new THREE.TorusGeometry(0.035, 0.016, 10, 24), M.copper, psu, [x, y, -0.025]);
+}
+const mainB = board(0.6, -0.05, 0.78, 0.56, 7);
+const soc = mesh(rbox(0.16, 0.16, 0.02, 0.004), M.chip, mainB, [-0.05, 0.02, -0.016]);
+fins(mainB, -0.05, 0.02, 0.2, 0.2, 6, 0.05);
+for (const [x, y] of [[0.17, 0.12], [0.17, -0.08]]) mesh(rbox(0.12, 0.07, 0.012, 0.003), M.chip, mainB, [x, y, -0.012]);
+const hdmiPorts = [];
+for (let i = 0; i < 3; i++) {
+  const p = mesh(rbox(0.06, 0.09, 0.04, 0.006), M.steel, mainB, [0.37, 0.18 - i * 0.12, -0.026]);
+  mesh(new THREE.BoxGeometry(0.062, 0.06, 0.012), M.dark, p, [0, 0, 0], false);
+  hdmiPorts.push(p);
+}
+const tcon = board(0, -0.68, 0.9, 0.16, 11);
+for (let i = 0; i < 3; i++) mesh(rbox(0.08, 0.06, 0.01, 0.003), M.chip, tcon, [-0.25 + i * 0.25, 0, -0.011]);
+for (let i = 0; i < 4; i++) mesh(new THREE.BoxGeometry(0.14, 0.11, 0.004), M.ffc, tv, [-0.33 + i * 0.22, -0.815, BZ + 0.012]);
+// шлейф главная плата → T-con
+{
+  const a = new THREE.Vector3(0.45, -0.33, BZ - 0.012), b = new THREE.Vector3(0.15, -0.6, BZ - 0.012);
+  const ribbon = mesh(new THREE.BoxGeometry(0.09, a.distanceTo(b), 0.004), M.white, tv, [(a.x + b.x) / 2, (a.y + b.y) / 2, a.z]);
+  ribbon.rotation.z = Math.atan2(b.y - a.y, b.x - a.x) - Math.PI / 2;
+}
+// кабель питания блок питания → главная плата
+mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.42, 10), M.dark, tv, [0.0, -0.08, BZ - 0.02]).rotation.z = Math.PI / 2;
+const speakers = [];
+for (const x of [-1.15, 1.15]) {
+  const s = mesh(rbox(0.34, 0.11, 0.1, 0.02), M.dark, tv, [x, -0.72, -0.1]);
+  mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.012, 24), M.steel, s, [0.08, -0.056, 0], false);
+  mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.012, 24), M.steel, s, [-0.08, -0.056, 0], false);
+  speakers.push(s);
+}
+// светодиоды подсветки по полю (видны в разрезе)
+{
+  const leds = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, 0.008), new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff3d6', emissiveIntensity: 1.6 }), 16 * 9);
+  const o = new THREE.Object3D();
+  let n = 0;
+  for (let x = 0; x < 16; x++) for (let y = 0; y < 9; y++) {
+    o.position.set(-PW / 2 + (x + 0.5) * PW / 16, -PH / 2 + (y + 0.5) * PH / 9, 0.0);
+    o.updateMatrix(); leds.setMatrixAt(n++, o.matrix);
+  }
+  leds.material.clippingPlanes = [cutX, cutY];
+  leds.material.clipIntersection = true;
+  tv.add(leds);
+}
+
+// ---------- вырезанный угол: слои разлетаются ----------
+const piece = new THREE.Group();
+tvStage.add(piece);
+const PCW = PW / 2 - CUT.cx, PCH = PH / 2 - CUT.cy;
+const PCX = CUT.cx + PCW / 2, PCY = TVY + CUT.cy + PCH / 2;
+const stripeTex = canvasTex(256, 128, (g, w, h) => {
+  const cols = [P.R, P.G, P.B];
+  for (let i = 0; i < 48; i++) { g.fillStyle = cols[i % 3]; g.fillRect(i * w / 48, 0, w / 48 - 1, h); }
+});
+const gridTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#c9d8e6'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(40,60,90,0.5)'; g.lineWidth = 1.5;
+  for (let i = 0; i <= 32; i++) { g.beginPath(); g.moveTo(i * w / 32, 0); g.lineTo(i * w / 32, h); g.stroke(); g.beginPath(); g.moveTo(0, i * h / 32); g.lineTo(w, i * h / 32); g.stroke(); }
+  g.fillStyle = 'rgba(40,60,90,0.6)';
+  for (let x = 0; x < 32; x++) for (let y = 0; y < 32; y++) g.fillRect(x * w / 32 + 1, y * h / 32 + 1, 2.5, 2.5);
+});
+const polTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#b9b3e6'; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(80,70,160,0.35)';
+  for (let i = 0; i < 40; i++) g.fillRect(i * w / 40, 0, 2, h);
+});
+const pieceLayers = LAYERS.map((L, i) => {
+  const g = new THREE.Group();
+  let m;
+  if (i === 1) m = phys('#ffffff', { map: stripeTex });
+  else if (i === 3) m = phys('#ffffff', { map: gridTex, roughness: 0.15 });
+  else if (i === 4) m = phys('#ffffff', { map: polTex });
+  else m = L.mat.clone();
+  if (i === 2) m.opacity = 0.75;
+  const slab = mesh(new THREE.BoxGeometry(PCW, PCH, L.t), m, g);
+  const sideMat = new THREE.MeshBasicMaterial({ color: L.cap, toneMapped: false });
+  // цветные торцы — как на срезе
+  for (const [w2, h2, x2, y2] of [[0.004, PCH, -PCW / 2 - 0.002, 0], [PCW, 0.004, 0, -PCH / 2 - 0.002]]) {
+    mesh(new THREE.BoxGeometry(w2, h2, L.t), sideMat, g, [x2, y2, 0], false);
+  }
+  if (i === 0) {
+    const tex = artTex.clone();
+    const u0 = (CUT.cx + PW / 2) / PW, v0 = (CUT.cy + PH / 2) / PH;
+    tex.offset.set(u0, v0); tex.repeat.set(1 - u0, 1 - v0); tex.needsUpdate = true;
+    mesh(new THREE.PlaneGeometry(PCW, PCH), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), g, [0, 0, L.t / 2 + 0.0005], false);
+  }
+  if (i === 6) {
+    const leds = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, 0.012), new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff3d6', emissiveIntensity: 1.8 }), 5 * 3);
+    const o = new THREE.Object3D();
+    let n = 0;
+    for (let x = 0; x < 5; x++) for (let y = 0; y < 3; y++) {
+      o.position.set(-PCW / 2 + (x + 0.5) * PCW / 5, -PCH / 2 + (y + 0.5) * PCH / 3, L.t / 2 + 0.004);
+      o.updateMatrix(); leds.setMatrixAt(n++, o.matrix);
+    }
+    g.add(leds);
+  }
+  if (i === 2) {
+    const rods = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 6), phys('#1d8a64'), 10 * 6);
+    g.userData.rods = rods;
+    g.add(rods);
+  }
+  piece.add(g);
+  return g;
+});
+const PH_N = 24;
+const photons = new THREE.InstancedMesh(new THREE.SphereGeometry(0.02, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), PH_N);
+photons.frustumCulled = false;
+piece.add(photons);
+const PHS = Array.from({ length: PH_N }, (_, i) => ({
+  x: -PCW / 2 + 0.08 + (i % 8) * (PCW - 0.16) / 7, y: -PCH / 2 + 0.1 + Math.floor(i / 8) * (PCH - 0.2) / 2,
+  ch: i % 3, phase: hash(i, 5), blocked: hash(i, 9) < 0.3,
+}));
+
+// ---------- микроскоп: субпиксели и «жалюзи» кристаллов ----------
+const micro = new THREE.Group();
+scene.add(micro);
+const MC = 5, MR = 4, PIX = 0.44, MY = 1.75;
+const cells = [], shutters = [];
+mesh(new THREE.BoxGeometry(MC * PIX + 0.1, MR * PIX + 0.1, 0.03), new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e6', emissiveIntensity: 1.2 }), micro, [0, MY, -0.08], false);
+mesh(new THREE.BoxGeometry(MC * PIX + 0.16, MR * PIX + 0.16, 0.06), M.dark, micro, [0, MY, -0.12]);
+for (let r = 0; r < MR; r++) for (let c = 0; c < MC; c++) for (let s = 0; s < 3; s++) {
+  const x = (c - (MC - 1) / 2) * PIX + (s - 1) * PIX / 3, y = MY + ((MR - 1) / 2 - r) * PIX;
+  const col = new THREE.Color([P.R, P.G, P.B][s]);
+  const cell = mesh(rbox(PIX / 3 - 0.03, PIX - 0.05, 0.04, 0.008), new THREE.MeshPhysicalMaterial({ color: col, emissive: col, emissiveIntensity: 0, roughness: 0.3, clearcoat: 0.6 }), micro, [x, MY + 0 + (y - MY), 0]);
+  const sh = mesh(new THREE.BoxGeometry(PIX / 3 - 0.035, PIX - 0.06, 0.008), phys('#2b2f36', { roughness: 0.25, clearcoat: 0.8, transparent: true, opacity: 0.92 }), micro, [x, y, 0.07]);
+  cells.push({ cell, c, r, s });
+  shutters.push(sh);
+}
+// чёрная маска между ячейками
+for (let c = 0; c <= MC * 3; c++) mesh(new THREE.BoxGeometry(c % 3 ? 0.012 : 0.03, MR * PIX, 0.05), M.dark, micro, [(c - MC * 1.5) * PIX / 3, MY, 0.005], false);
+for (let r = 0; r <= MR; r++) mesh(new THREE.BoxGeometry(MC * PIX, 0.03, 0.05), M.dark, micro, [0, MY + (r - MR / 2) * PIX, 0.005], false);
+const pixLevel = (c, r, s, t) => {
+  const ph = t * 1.4 - c * 0.55 - r * 0.35;
+  const v = [0.5 + 0.5 * Math.sin(ph), 0.5 + 0.5 * Math.sin(ph + 2.1), 0.5 + 0.5 * Math.sin(ph + 4.2)][s];
+  return clamp(v * 1.25 - 0.1);
+};
+
+// ---------- OLED против LCD: срезы ----------
+const sect = new THREE.Group();
+scene.add(sect);
+function stack(baseY, layers) {
+  const g = new THREE.Group();
+  let y = baseY;
+  const out = [];
+  for (const L of [...layers].reverse()) {
+    const m = mesh(new THREE.BoxGeometry(2.6, L.h, 0.7), L.m, g, [0, y + L.h / 2, 0]);
+    out.unshift({ ...L, y: y + L.h / 2, mesh: m });
+    y += L.h + 0.006;
+  }
+  sect.add(g);
+  return { g, layers: out, top: y };
+}
+const glow = (c, i = 1.5) => new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: c, emissiveIntensity: i });
+const lcdStack = stack(2.35, [
+  { name: 'Стекло', h: 0.05, m: M.glass },
+  { name: 'Фильтр', h: 0.05, m: phys('#ffffff', { map: stripeTex }) },
+  { name: 'Кристаллы', h: 0.04, m: phys('#bfe6dc') },
+  { name: 'Транзисторы', h: 0.05, m: phys('#ffffff', { map: gridTex }) },
+  { name: 'Поляризатор', h: 0.03, m: phys('#ffffff', { map: polTex }) },
+  { name: 'Плёнки', h: 0.05, m: phys('#f6f6f4', { roughness: 0.9 }) },
+  { name: 'Подсветка', h: 0.08, m: glow('#fff3d6', 1.4) },
+  { name: 'Шасси', h: 0.05, m: M.steel },
+]);
+const oledStack = stack(1.05, [
+  { name: 'Стекло', h: 0.05, m: M.glass },
+  { name: 'Поляризатор', h: 0.03, m: phys('#ffffff', { map: polTex }) },
+  { name: 'Светящийся слой', h: 0.05, m: M.dark },
+  { name: 'Транзисторы', h: 0.05, m: phys('#ffffff', { map: gridTex }) },
+  { name: 'Подложка', h: 0.04, m: M.steel },
+]);
+const emitters = [];
+{
+  const em = oledStack.layers[2];
+  for (let i = 0; i < 24; i++) {
+    const col = new THREE.Color([P.R, P.G, P.B][i % 3]);
+    const m = mesh(new THREE.BoxGeometry(2.6 / 24 - 0.012, em.h + 0.004, 0.7 + 0.004), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0 }), sect, [-1.3 + (i + 0.5) * 2.6 / 24, em.y, 0], false);
+    emitters.push(m);
+  }
+}
+
+// ---------- сцены, камера ----------
+const STAGES = [
+  { g: tvStage, a: 0, b: 24 }, { g: micro, a: 24, b: 31.5 }, { g: sect, a: 31.5, b: 38.5 }, { g: tvStage, a: 38.5, b: 99 },
+];
+const DIPS = [24, 31.5, 38.5];
+const EASE = {
+  slow: (x) => -(Math.cos(Math.PI * x) - 1) / 2,
+  whip: (x) => (x < 0.5 ? 16 * x ** 5 : 1 - Math.pow(-2 * x + 2, 5) / 2),
+};
+const k = (t, az, el, r, tg, e = 'slow', roll = 0) => ({ t, az, el, r, tg, e, roll });
+const TC = [0, TVY, 0];
+const CORNER = [PCX, PCY, 0.6];
+const BACK = [0.05, TVY - 0.05, -0.1];
+const CAM = [
+  // 1. телевизор целиком
+  k(0, -0.62, 0.1, 10.4, TC), k(2.2, -0.32, 0.14, 9.8, TC),
+  k(3.0, 0.95, 0.2, 9.0, TC, 'whip', 0.05), k(5.5, 1.25, 0.22, 8.6, TC),
+  // 2. крышка становится прозрачной, смотрим сзади
+  k(6.4, 2.45, 0.2, 7.6, [0, TVY - 0.1, 0], 'whip', -0.05), k(9.0, 2.75, 0.24, 7.0, [0, TVY - 0.1, 0]),
+  k(9.8, 3.62, 0.12, 6.8, [0, TVY - 0.1, 0], 'whip', 0.05), k(12.0, 3.78, 0.15, 6.6, [0, TVY - 0.1, 0]),
+  // 3. вырезанный угол и слои
+  k(12.9, 0.55, 0.22, 6.4, [0.6, TVY + 0.35, 0.2], 'whip', -0.05), k(15.0, 0.62, 0.26, 5.4, [0.95, TVY + 0.5, 0.5]),
+  k(15.8, 1.32, 0.18, 4.6, CORNER, 'whip', 0.06), k(18.5, 1.44, 0.22, 4.4, CORNER),
+  k(19.3, 0.38, 0.42, 4.6, CORNER, 'whip', -0.05), k(23.99, 0.26, 0.38, 4.8, CORNER),
+  // 4. микроскоп
+  k(24, -0.55, 0.22, 6.2, [0, MY + 0.3, 0]), k(26.0, -0.34, 0.26, 5.8, [0, MY + 0.3, 0]),
+  k(26.8, 0.95, 0.1, 5.4, [0, MY + 0.3, 0], 'whip', 0.06), k(29.0, 1.08, 0.14, 5.2, [0, MY + 0.3, 0]),
+  k(29.7, 0.1, 0.8, 6.8, [0, MY + 0.45, 0.3], 'whip', -0.05), k(31.49, 0.0, 0.76, 7.0, [0, MY + 0.45, 0.3]),
+  // 5. срезы OLED и LCD
+  k(31.5, -0.55, 0.22, 7.6, [0, 1.95, 0]), k(33.5, -0.32, 0.26, 7.2, [0, 1.95, 0]),
+  k(34.3, 0.95, 0.1, 6.6, [0, 1.95, 0], 'whip', 0.06), k(36.2, 1.08, 0.13, 6.4, [0, 1.95, 0]),
+  k(36.9, 0.12, 0.3, 7.2, [0, 1.95, 0], 'whip', -0.05), k(38.49, 0.0, 0.27, 7.4, [0, 1.95, 0]),
+  // 6. путь сигнала сзади
+  k(38.5, 2.62, 0.15, 8.2, BACK), k(40.5, 2.82, 0.2, 7.6, BACK),
+  k(41.3, 3.5, 0.42, 5.8, [0.35, TVY + 0.05, -0.1], 'whip', 0.06), k(43.6, 3.62, 0.46, 5.6, [0.35, TVY + 0.05, -0.1]),
+  k(44.4, 2.55, 0.06, 6.4, [-0.1, TVY - 0.05, -0.1], 'whip', -0.05), k(47.0, 2.45, 0.08, 6.6, [-0.1, TVY - 0.05, -0.1]),
+  // 7. собираем обратно
+  k(48.2, 0.9, 0.15, 9.6, TC, 'whip', 0.05), k(51.0, 0.35, 0.13, 10.0, TC),
+  k(56, -0.45, 0.12, 10.6, TC),
+];
+function rig(t) {
+  let i = 0;
+  while (i < CAM.length - 2 && t >= CAM[i + 1].t) i++;
+  const a = CAM[i], b = CAM[i + 1];
+  const raw = clamp((t - a.t) / (b.t - a.t));
+  const e = EASE[b.e](raw);
+  return {
+    az: lerp(a.az, b.az, e) + Math.sin(t * 0.7) * 0.01,
+    el: lerp(a.el, b.el, e) + Math.sin(t * 0.53) * 0.006,
+    r: lerp(a.r, b.r, e),
+    tg: a.tg.map((v, j) => lerp(v, b.tg[j], e)),
+    roll: b.e === 'whip' ? Math.sin(raw * Math.PI) * b.roll : 0,
+  };
+}
+function placeCamera(t) {
+  const c = rig(t);
+  camera.position.set(c.tg[0] + c.r * Math.cos(c.el) * Math.sin(c.az), c.tg[1] + c.r * Math.sin(c.el), c.tg[2] + c.r * Math.cos(c.el) * Math.cos(c.az));
+  camera.up.set(0, 1, 0);
+  camera.lookAt(...c.tg);
+  camera.rotateZ(c.roll);
+  camera.updateMatrixWorld();
+}
+const camSpeed = (t) => { const a = rig(t), b = rig(t - 1 / 30); return Math.abs(a.az - b.az) + Math.abs(a.el - b.el); };
+const v3 = new THREE.Vector3();
+function proj(p) {
+  v3.set(...p).project(camera);
+  return [(v3.x + 1) / 2 * W, (1 - v3.y) / 2 * H];
+}
+// точка в координатах телевизора → мировые
+const tvp = (x, y, z) => [x, TVY + y, z];
+
+// ---------- анимация ----------
+const O = new THREE.Object3D();
+const xray = (t) => prog(t, 6.6, 7.6) * (1 - prog(t, 47.6, 48.6));
+const cutOn = (t) => t >= 13.4 && t < 24;
+const explode = (t) => eio(prog(t, 15.0, 16.4));
+const slideOut = (t) => eio(prog(t, 13.6, 14.8));
+function along(pts, f) {
+  const segs = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); segs.push(l); total += l; }
+  let d = f * total;
+  for (let i = 0; i < segs.length; i++) {
+    if (d <= segs[i]) { const q = d / segs[i]; return [lerp(pts[i][0], pts[i + 1][0], q), lerp(pts[i][1], pts[i + 1][1], q)]; }
+    d -= segs[i];
+  }
+  return pts[pts.length - 1];
+}
+const SIGNAL = [[0.97, 0.13], [0.75, 0.13], [0.55, -0.03], [0.45, -0.33], [0.15, -0.6], [0, -0.68], [0, -0.86]];
+const POWER = [[-0.3, -0.06], [0.0, -0.08], [0.25, -0.08], [0.4, -0.12]];
+const pulses = new THREE.InstancedMesh(new THREE.SphereGeometry(0.018, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), 16);
+pulses.frustumCulled = false;
+tv.add(pulses);
+
+function animate(t) {
+  for (const s of STAGES) s.g.visible = false;
+  for (const s of STAGES) if (t >= s.a && t < s.b) s.g.visible = true;
+
+  // рентген крышки
+  const x = xray(t);
+  for (const { m, edges } of coverParts) {
+    m.material.opacity = lerp(1, 0.1, x);
+    m.material.depthWrite = x < 0.5;
+    m.castShadow = x < 0.5;
+    edges.material.opacity = x * 0.7;
+  }
+  // разрез угла
+  cutX.constant = cutOn(t) ? PCX - PCW / 2 : 99;
+  cutY.constant = cutOn(t) ? PCY - PCH / 2 : 99;
+  piece.visible = tvStage.visible && cutOn(t);
+  const so = slideOut(t), ex = explode(t);
+  piece.position.set(PCX + so * 0.15, PCY + so * 0.1, so * 0.35);
+  pieceLayers.forEach((g, i) => {
+    g.position.z = LAYERS[i].z + ex * (LAYERS.length - 1 - i) * 0.17;
+    g.rotation.y = ex * -0.12;
+    const rods = g.userData.rods;
+    if (rods) {
+      let n = 0;
+      for (let xx = 0; xx < 10; xx++) for (let yy = 0; yy < 6; yy++) {
+        O.position.set(-PCW / 2 + (xx + 0.5) * PCW / 10, -PCH / 2 + (yy + 0.5) * PCH / 6, LAYERS[2].t / 2 + 0.008);
+        O.rotation.set(Math.PI / 2 * Math.sin(t * 2 + xx * 0.5 + yy * 0.7), 0, Math.PI / 2);
+        O.scale.setScalar(1);
+        O.updateMatrix(); rods.setMatrixAt(n++, O.matrix);
+      }
+      rods.instanceMatrix.needsUpdate = true;
+    }
+  });
+  // фотоны: от подсветки к стеклу
+  const on = prog(t, 17.0, 17.4) * (1 - prog(t, 23.4, 23.8));
+  const zBack = LAYERS[6].z + ex * 1 * 0.17, zFront = LAYERS[0].z + ex * 7 * 0.17 + 0.25;
+  const zFilter = LAYERS[1].z + ex * 6 * 0.17, zLC = LAYERS[2].z + ex * 5 * 0.17;
+  const col = new THREE.Color();
+  PHS.forEach((p, i) => {
+    const age = t - 17.1 - p.phase * 1.2;
+    const z = age < 0 ? zBack : zBack + ((age * 0.9) % (zFront - zBack));
+    let s = on * (age >= 0 ? 1 : 0);
+    if (p.blocked && z > zLC) s = 0;
+    if (z > zFront - 0.15) s *= (zFront - z) / 0.15;
+    O.position.set(p.x, p.y, z);
+    O.rotation.set(0, 0, 0);
+    O.scale.setScalar(Math.max(s, 1e-4));
+    O.updateMatrix(); photons.setMatrixAt(i, O.matrix);
+    col.set(z > zFilter ? [P.R, P.G, P.B][p.ch] : '#fff6dc');
+    photons.setColorAt(i, col);
+  });
+  photons.instanceMatrix.needsUpdate = true;
+  photons.instanceColor.needsUpdate = true;
+
+  // импульсы сигнала и питания
+  const pOn = prog(t, 39.6, 40.0) * (1 - prog(t, 46.8, 47.2));
+  for (let i = 0; i < 16; i++) {
+    const isSig = i < 10;
+    const f = (t * (isSig ? 0.45 : 0.6) + i * (isSig ? 0.1 : 0.17)) % 1;
+    const [px, py] = along(isSig ? SIGNAL : POWER, f);
+    O.position.set(px, py, BZ - 0.03);
+    O.scale.setScalar(Math.max(pOn * Math.sin(f * Math.PI) * 1.3, 1e-4));
+    O.updateMatrix(); pulses.setMatrixAt(i, O.matrix);
+    col.set(isSig ? P.signal : P.power);
+    pulses.setColorAt(i, col);
+  }
+  pulses.instanceMatrix.needsUpdate = true;
+  pulses.instanceColor.needsUpdate = true;
+
+  // микроскоп
+  if (micro.visible) {
+    cells.forEach(({ cell, c, r, s }, i) => {
+      const lv = pixLevel(c, r, s, t);
+      cell.material.emissiveIntensity = 0.05 + 1.1 * lv;
+      shutters[i].rotation.y = lv * Math.PI / 2 * 0.92;
+    });
+  }
+  // OLED: каждый субпиксель включается сам
+  if (sect.visible) {
+    emitters.forEach((m, i) => {
+      const px = Math.floor(i / 3);
+      const lv = clamp(Math.sin(t * 2 - px * 0.9 + (i % 3) * 1.7) * 1.4 - 0.2);
+      m.material.emissiveIntensity = lv * 1.6;
+      m.material.color.set(lv > 0.05 ? [P.R, P.G, P.B][i % 3] : '#15171b');
+    });
+  }
+}
+
+// ---------- 2D-слой: типографика и выноски ----------
+const ui = document.getElementById('ui').getContext('2d');
+const FH = "'Inter Display','Inter','Segoe UI',Arial,sans-serif";
+const FB = "'Inter','Segoe UI',Arial,sans-serif";
+function txt(s, x, y, o = {}) {
+  const { size = 40, weight = 700, color = P.ink, align = 'left', alpha = 1, font = FB, lh = 1.2, spacing = 0, base = 'alphabetic' } = o;
+  if (alpha <= 0.001) return 0;
+  ui.save();
+  ui.globalAlpha *= alpha;
+  ui.font = `${weight} ${size}px ${font}`;
+  ui.textAlign = align; ui.textBaseline = base;
+  ui.fillStyle = color;
+  if (spacing) ui.letterSpacing = spacing + 'px';
+  const lines = String(s).split('\n');
+  lines.forEach((l, i) => ui.fillText(l, x, y + i * size * lh));
+  ui.restore();
+  return lines.length * size * lh;
+}
+function measure(s, size, weight = 700, font = FB) {
+  ui.save(); ui.font = `${weight} ${size}px ${font}`;
+  const w = ui.measureText(s).width;
+  ui.restore();
+  return w;
+}
+
+// заголовочный блок слева сверху: надзаголовок, заголовок, пояснение
+function heading(t, a, b, kicker, title, body) {
+  const al = vis(t, a, b, 0.35, 0.35);
+  if (al <= 0) return;
+  const e1 = reveal(t, a), e2 = reveal(t, a + 0.15), e3 = reveal(t, a + 0.35);
+  ui.save(); ui.globalAlpha = al * e1;
+  ui.fillStyle = P.accent; ui.fillRect(70, 196, 46 * e1, 5);
+  ui.restore();
+  txt(kicker, 132, 208, { size: 24, weight: 800, color: P.accent, alpha: al * e1, spacing: 3 });
+  const th = txt(title, 70 - (1 - e2) * 30, 290, { size: 64, weight: 800, font: FH, alpha: al * e2, lh: 1.05 });
+  if (body) txt(body, 70 - (1 - e3) * 30, 290 + th + 2, { size: 31, weight: 500, color: P.body, alpha: al * e3, lh: 1.35 });
+}
+
+// выноски: точка на модели, линия-«ломаная», номер в кружке и подпись
+function labels(items, alpha) {
+  if (alpha <= 0.01) return;
+  const cols = { L: [], R: [] };
+  for (const it of items) {
+    const [px, py] = proj(it.p);
+    if (px < 20 || px > W - 20 || py < 20 || py > H - 20) continue;
+    const side = it.side ?? (px < 540 ? 'L' : 'R');
+    cols[side].push({ ...it, px, py, ly: py });
+  }
+  for (const side of ['L', 'R']) {
+    const list = cols[side].sort((a, b) => a.py - b.py);
+    if (!list.length) continue;
+    list[0].ly = Math.max(list[0].ly, 600);
+    for (let j = 1; j < list.length; j++) list[j].ly = Math.max(list[j].ly, list[j - 1].ly + 66);
+    const over = list[list.length - 1].ly - 1420;
+    if (over > 0) for (const p of list) p.ly -= over;
+    for (const it of list) {
+      const a = alpha * (it.a ?? 1);
+      if (a <= 0.01) continue;
+      const tw = measure(it.text, 30);
+      const cx = side === 'L' ? 96 : W - 96;
+      const tx = side === 'L' ? cx + 34 : cx - 34;
+      const lineEnd = side === 'L' ? tx + tw + 16 : tx - tw - 16;
+      ui.save();
+      ui.globalAlpha = a;
+      ui.strokeStyle = P.ink; ui.lineWidth = 2;
+      const elbow = lerp(lineEnd, it.px, 0.35);
+      ui.beginPath(); ui.moveTo(lineEnd, it.ly); ui.lineTo(elbow, it.ly); ui.lineTo(it.px, it.py); ui.stroke();
+      ui.fillStyle = '#ffffff'; ui.beginPath(); ui.arc(it.px, it.py, 9, 0, Math.PI * 2); ui.fill();
+      ui.fillStyle = P.ink; ui.beginPath(); ui.arc(it.px, it.py, 5, 0, Math.PI * 2); ui.fill();
+      ui.fillStyle = it.hi ? P.accent : P.ink;
+      ui.beginPath(); ui.arc(cx, it.ly, 22, 0, Math.PI * 2); ui.fill();
+      ui.restore();
+      txt(String(it.n), cx, it.ly + 9, { size: 24, weight: 800, color: '#fff', align: 'center', alpha: a });
+      ui.save(); ui.globalAlpha = a * 0.88;
+      ui.fillStyle = 'rgba(244,246,248,0.85)';
+      const bx = side === 'L' ? tx - 8 : tx - tw - 8;
+      ui.beginPath(); ui.roundRect(bx, it.ly - 22, tw + 16, 44, 8); ui.fill();
+      ui.restore();
+      txt(it.text, tx, it.ly + 10, { size: 30, weight: 700, alpha: a, align: side === 'L' ? 'left' : 'right', color: it.hi === false ? P.body : P.ink });
+    }
+  }
+}
+
+function legend(items, y, alpha) {
+  if (alpha <= 0.01) return;
+  let x = 70;
+  for (const [color, s] of items) {
+    ui.save(); ui.globalAlpha = alpha; ui.fillStyle = color;
+    ui.beginPath(); ui.arc(x + 10, y - 10, 10, 0, Math.PI * 2); ui.fill(); ui.restore();
+    txt(s, x + 30, y, { size: 28, weight: 700, alpha });
+    x += 30 + measure(s, 28) + 40;
+  }
+}
+
+function overlay(t) {
+  ui.clearRect(0, 0, W, H);
+  const lab = 1 - clamp((camSpeed(t) - 0.01) / 0.025);
+
+  heading(t, 0.3, 5.9, 'КАК ЭТО РАБОТАЕТ', 'Современный\nтелевизор', 'Разберём его слой за слоем —\nкак инженеры');
+  heading(t, 6.2, 12.4, '01 · ВНУТРИ КОРПУСА', 'Что под крышкой', 'Сделаем заднюю крышку прозрачной');
+  labels([
+    { n: 1, text: 'Блок питания', p: tvp(-0.54, -0.06, -0.13) },
+    { n: 2, text: 'Главная плата', p: tvp(0.55, -0.03, -0.14) },
+    { n: 3, text: 'Плата T-con', p: tvp(0, -0.68, -0.085) },
+    { n: 4, text: 'Динамики', p: tvp(-1.15, -0.72, -0.15) },
+    { n: 5, text: 'Матрица', p: tvp(1.4, 0.6, -0.03) },
+  ], vis(t, 7.8, 12.4, 0.4, 0.3) * lab);
+
+  heading(t, 12.6, 23.9, '02 · МАТРИЦА', 'Экран —\nэто 8 слоёв', null);
+  const steps = [[17.0, 6], [19.4, 2], [21.6, 1]];
+  let active = -1;
+  for (const [st, idx] of steps) if (t >= st) active = idx;
+  labels(LAYERS.map((L, i) => {
+    const g = pieceLayers[i];
+    const wp = new THREE.Vector3(-PCW / 2, -PCH / 2 + 0.06, 0).applyMatrix4(g.matrixWorld);
+    return { n: i + 1, text: L.name, p: [wp.x, wp.y, wp.z], side: 'L', hi: active === -1 ? undefined : i === active, a: active === -1 || i === active ? 1 : 0.45 };
+  }), vis(t, 16.0, 23.9, 0.5, 0.3) * lab);
+  const cap = [
+    [17.0, 19.3, 'Подсветка светит белым светом'],
+    [19.4, 21.5, 'Кристаллы поворачиваются\nи дозируют свет для каждой точки'],
+    [21.6, 23.9, 'Фильтр окрашивает свет\nв красный, зелёный или синий'],
+  ];
+  for (const [a, b, s] of cap) {
+    const al = vis(t, a, b, 0.3, 0.3);
+    txt(s, 70, 1520, { size: 34, weight: 600, color: P.body, alpha: al * reveal(t, a), lh: 1.3 });
+  }
+
+  heading(t, 24.2, 31.4, '03 · ПИКСЕЛИ', '8,3 млн пикселей', 'Каждый — это 3 субпикселя.\nКристалл работает как жалюзи:\nоткрыт — светло, закрыт — темно');
+  const mx = (c, r, s) => [(c - (MC - 1) / 2) * PIX + (s - 1) * PIX / 3, MY + ((MR - 1) / 2 - r) * PIX, 0];
+  labels([
+    { n: 1, text: 'Субпиксель', p: [...mx(4, 3, 0).slice(0, 2), 0.03] },
+    { n: 2, text: '«Жалюзи» из кристаллов', p: [...mx(0, 3, 1).slice(0, 2), 0.075] },
+    { n: 3, text: 'Белая подсветка', p: [-(MC * PIX) / 2 + 0.05, MY - (MR * PIX) / 2 + 0.03, -0.065] },
+  ], vis(t, 25.0, 31.3, 0.4, 0.3) * lab);
+  legend([[P.R, 'R'], [P.G, 'G'], [P.B, 'B']], 1520, vis(t, 25.4, 31.3));
+
+  heading(t, 31.7, 38.4, '04 · OLED', 'OLED: свет\nбез подсветки', 'Каждый субпиксель светится сам.\nВыключен — идеальный чёрный');
+  const lA = vis(t, 32.6, 38.4, 0.4, 0.3) * lab;
+  labels([
+    { n: 1, text: 'LCD: 8 слоёв', p: [-1.3, lcdStack.layers[0].y, 0.35], side: 'L' },
+    { n: 2, text: 'Подсветка горит всегда', p: [-1.0, lcdStack.layers[6].y, 0.35], side: 'L' },
+    { n: 3, text: 'OLED: 5 слоёв', p: [-1.3, oledStack.layers[0].y, 0.35], side: 'L' },
+    { n: 4, text: 'Пиксели светятся сами', p: [-0.6, oledStack.layers[2].y, 0.35], side: 'L', hi: true },
+  ], lA);
+
+  heading(t, 38.8, 47.2, '05 · ЭЛЕКТРОНИКА', 'Путь сигнала', 'HDMI → процессор → T-con → матрица.\n120 раз в секунду');
+  labels([
+    { n: 1, text: 'Вход HDMI', p: tvp(0.97, 0.13, -0.11) },
+    { n: 2, text: 'Процессор', p: tvp(0.55, -0.03, -0.14) },
+    { n: 3, text: 'Плата T-con', p: tvp(0, -0.68, -0.085) },
+    { n: 4, text: 'Блок питания', p: tvp(-0.54, -0.06, -0.13) },
+  ], vis(t, 39.8, 47.0, 0.4, 0.3) * lab);
+  legend([[P.signal, 'Видеосигнал'], [P.power, 'Питание']], 1520, vis(t, 40.0, 47.0));
+
+  // финал
+  const fa = vis(t, 48.6, 57, 0.4, 0.1);
+  if (fa > 0) {
+    const e1 = reveal(t, 48.6), e2 = reveal(t, 49.1), e3 = reveal(t, 49.7);
+    txt('ИТОГО', 70, 208, { size: 24, weight: 800, color: P.accent, alpha: fa * e1, spacing: 3 });
+    txt('≈ 3 млрд', 70 - (1 - e2) * 30, 318, { size: 120, weight: 900, font: FH, alpha: fa * e2 });
+    txt('вспышек субпикселей каждую секунду:\n8,3 млн пикселей × 3 × 120 Гц', 70 - (1 - e3) * 30, 384, { size: 31, weight: 500, color: P.body, alpha: fa * e3, lh: 1.35 });
+    const be = reveal(t, 51.2);
+    if (be > 0) {
+      ui.save(); ui.globalAlpha = fa * be;
+      ui.fillStyle = P.ink;
+      ui.beginPath(); ui.roundRect(70, 1440 + (1 - be) * 20, 560, 92, 46); ui.fill();
+      ui.fillStyle = P.accent; ui.beginPath(); ui.arc(116, 1486 + (1 - be) * 20, 14, 0, Math.PI * 2); ui.fill();
+      ui.restore();
+      txt('Подпишись — разберём ещё', 146, 1498 + (1 - be) * 20, { size: 33, weight: 800, color: '#fff', alpha: fa * be });
+    }
+  }
+
+  // переходы: короткое «затемнение» в цвет фона
+  for (const T of DIPS) {
+    const d = 1 - Math.abs(t - T) / 0.3;
+    if (d > 0) { ui.save(); ui.globalAlpha = eio(clamp(d)); ui.fillStyle = P.bg; ui.fillRect(0, 0, W, H); ui.restore(); }
+  }
+}
+
+function renderAt(t) {
+  animate(t);
+  placeCamera(t);
+  scene.updateMatrixWorld();
+  renderer.render(scene, camera);
+  overlay(t);
+}
+window.renderAt = renderAt;
+
+await document.fonts.load(`800 60px ${FH}`);
+await document.fonts.load(`700 40px ${FB}`);
+renderAt(0);
+window.READY = true;
+if (!location.search.includes('render')) {
+  const fit = () => { document.getElementById('stage').style.transform = `scale(${Math.min(innerWidth / W, innerHeight / H)})`; };
+  fit(); addEventListener('resize', fit);
+  const start = performance.now();
+  const loop = () => { renderAt(((performance.now() - start) / 1000) % VIDEO.duration); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
