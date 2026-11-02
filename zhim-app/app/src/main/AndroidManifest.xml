@@ -3,6 +3,8 @@
 
     <!-- Only used to load the web fonts; the app works offline without them. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Buzz when the rest timer ends. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"

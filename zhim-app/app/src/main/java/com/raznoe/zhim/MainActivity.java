@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.view.WindowManager;
 import android.webkit.WebViewClient;
 
 import java.io.IOException;
@@ -30,6 +31,8 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(Color.parseColor("#151515"));
         getWindow().setNavigationBarColor(Color.parseColor("#151515"));
+        // Keep the screen on while the app is open so the rest timer stays visible.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         web = new WebView(this);
         WebSettings s = web.getSettings();
@@ -39,6 +42,8 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
         s.setAllowFileAccess(false);
+        // Allow the timer beep without an extra tap on the page.
+        s.setMediaPlaybackRequiresUserGesture(false);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
