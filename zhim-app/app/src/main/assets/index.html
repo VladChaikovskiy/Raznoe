@@ -43,7 +43,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .wk{background:color-mix(in srgb,var(--hdr-fg) 12%,transparent);border:0;color:var(--hdr-fg);border-radius:5px;padding:6px 0;font-family:var(--display);font-weight:800;font-size:15px;position:relative}
 .wk.cur{background:var(--hdr-fg);color:var(--hdr)}
 .wk.ok::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--ok)}
-.tabs{display:grid;grid-template-columns:1fr 1fr}
+.tabs{display:grid;grid-template-columns:1fr 1fr .8fr}
 .tab{background:none;border:0;border-bottom:4px solid transparent;color:var(--hdr-fg);opacity:.6;padding:6px 0 7px;font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:1px;text-transform:uppercase;display:flex;justify-content:center;align-items:baseline;gap:6px}
 .tab small{font-size:13px;font-weight:600;letter-spacing:1px;opacity:.8}
 .tab.cur{opacity:1;border-bottom-color:var(--accent)}
@@ -115,6 +115,36 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .hist button{display:flex;justify-content:space-between;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 0;text-align:left;font-size:14px}
 .hist button span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
 .store{font-size:13px;color:var(--muted)}
+/* dumbbell suggestion */
+.sug{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg);border-radius:8px;padding:7px 10px;font-size:13px;color:var(--muted)}
+.sug b{color:var(--ink)}
+.sug button{flex:none;height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;font-size:13px}
+/* stats */
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{background:var(--card);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile b{font-family:var(--display);font-weight:900;font-size:30px;line-height:1;font-variant-numeric:tabular-nums}
+.tile span{font-size:12.5px;color:var(--muted);line-height:1.25}
+.panel{background:var(--card);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel h3{margin:0;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:1px;text-transform:uppercase}
+.panel .cap{font-size:13px;color:var(--muted);margin:0;min-height:1.3em}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis{fill:var(--muted);font:11px var(--body)}
+.chart .val{fill:var(--ink);font:700 12px var(--body)}
+.chart .bar{fill:var(--accent)}
+.chart .bar.sel{fill:var(--ink)}
+.chart .hit{fill:transparent;cursor:pointer}
+.chart .ln{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
+.chart .dot{fill:var(--accent);stroke:var(--card);stroke-width:2}
+.exrow{display:grid;grid-template-columns:minmax(0,1fr) 72px auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.exrow:last-child{border-bottom:0}
+.exrow .nm{font-size:14px;font-weight:600;line-height:1.25;min-width:0}
+.exrow .nm small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.exrow .dl{font-family:var(--display);font-weight:800;font-size:17px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.exrow .dl.up{color:var(--ok)}
+.spark{width:72px;height:26px;display:block}
+.spark polyline{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.spark circle{fill:var(--accent)}
 .bk{width:100%;min-height:110px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:12px/1.3 ui-monospace,monospace;padding:8px;resize:vertical}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:30;max-width:calc(100% - 32px);text-align:center}
 .row1>*,.row2>*{min-width:0}
@@ -123,7 +153,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
   .hbtn{padding:5px 7px;font-size:12px;letter-spacing:.5px}
   .row2{gap:4px}.cyc{font-size:13px}.cyc button{padding:2px 3px;font-size:20px}
   .weeks{gap:3px}.wk{font-size:13px;padding:6px 0}
-  .tab{font-size:17px;gap:4px}.tab small{font-size:11px}
+  .tab{font-size:16px;gap:4px}.tab small{display:none}
   .big{font-size:30px}.sr{font-size:19px}
   .step{width:36px;height:38px}.win{width:62px;height:38px;font-size:20px}
   .chip{min-width:40px;height:40px;padding:0 9px}
@@ -179,7 +209,7 @@ function defaults(){
 }
 
 var cfg=defaults(), sessions={};
-var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null};
+var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
 var mode="local", col=null, timers={}, chains={};
 
 try{var cached=JSON.parse(localStorage.getItem(LS)||"null");if(cached&&cached.cfg){cfg=cached.cfg;sessions=cached.sessions||{}}}catch(e){}
@@ -251,9 +281,11 @@ function render(){
      '<button data-act="cnext" aria-label="Следующий цикл"'+(c.c>=cfg.cycles.length?' disabled':'')+'>›</button></div><div class="weeks">';
   for(var w=1;w<=6;w++){var ok=dayDone(c.c,w,"tue")&&dayDone(c.c,w,"thu");h+='<button class="wk'+(w===c.w?' cur':'')+(ok?' ok':'')+'" data-act="week" data-w="'+w+'">Н'+w+'</button>'}
   h+='</div></div><div class="tabs">';
-  ["tue","thu"].forEach(function(d){h+='<button class="tab'+(d===c.d?' cur':'')+'" data-act="day" data-d="'+d+'">'+DAYN[d]+'<small>'+(d==="tue"?"сила":"объём")+'</small>'+(dayDone(c.c,c.w,d)?'<span class="chk">✓</span>':'')+'</button>'});
+  ["tue","thu"].forEach(function(d){h+='<button class="tab'+(d===c.d&&!ui.stats?' cur':'')+'" data-act="day" data-d="'+d+'">'+DAYN[d]+'<small>'+(d==="tue"?"сила":"объём")+'</small>'+(dayDone(c.c,c.w,d)?'<span class="chk">✓</span>':'')+'</button>'});
+  h+='<button class="tab'+(ui.stats?' cur':'')+'" data-act="stats">Итоги</button>';
   h+='</div></div></header>';
 
+  if(ui.stats){h+='<main class="pad"><div class="app list">'+statsHTML()+'</div></main>';if(ui.settings)h+=settingsHTML();root.innerHTML=h;return}
   h+='<main class="pad"><div class="app list">';
   if(ui.edit)h+='<p class="hint">Изменения в упражнениях действуют на все недели. Веса жима лёжа считаются от максимума цикла, его меняют в настройках.</p>';
   list.forEach(function(e,i){h+=ui.edit?editCard(e,i,list.length):viewCard(e,i,s,base)});
@@ -300,6 +332,8 @@ function viewCard(e,i,s,base){
   }else{
     var l=exLog(s,e.id),wv=(l&&l.w!=null)?l.w:e.weight;
     o+='<div class="exb"><div class="wt"><button class="step" data-act="wminus" data-id="'+e.id+'" aria-label="Меньше вес">−</button><input class="win" data-in="w" data-id="'+e.id+'" inputmode="decimal" placeholder="—" value="'+fmt(wv)+'" aria-label="Рабочий вес, кг"><span>кг</span><button class="step" data-act="wplus" data-id="'+e.id+'" aria-label="Больше вес">+</button></div><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>';
+    var sg=dbSuggest(e,base);
+    if(sg)o+='<div class="sug"><span>'+sg.label+': <b>~'+fmt(sg.kg)+' кг</b> в каждой руке</span>'+(wv===sg.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+sg.kg+'">Поставить</button>')+'</div>';
   }
   return o+chips(s,e)+'</article>';
 }
@@ -343,6 +377,123 @@ function settingsHTML(){
   return o+'</div></section>';
 }
 
+/* ---------- dumbbell suggestions ---------- */
+// Per-hand dumbbell weight for ~10 reps as a share of the barbell bench max.
+var DB_RULES=[
+  {test:function(n){return /жим/.test(n)&&/(наклон|30°|40°|45°|30-45|30–45)/.test(n)},k:.25,label:function(n){return /гантел/.test(n)?"Совет":"Если гантелями"}},
+  {test:function(n){return /жим/.test(n)&&/гантел/.test(n)},k:.29,label:function(){return "Совет"}},
+  {test:function(n){return /развод/.test(n)&&/плеч|стороны|дельт/.test(n)},k:.07,label:function(){return "Совет"}},
+  {test:function(n){return /махи/.test(n)},k:.07,label:function(){return "Совет"}},
+  {test:function(n){return /развод/.test(n)},k:.12,label:function(){return "Совет"}},
+  {test:function(n){return /тяга/.test(n)&&/гантел/.test(n)},k:.17,label:function(){return "Совет"}},
+  {test:function(n){return /француз/.test(n)&&/гантел/.test(n)},k:.14,label:function(){return "Совет"}},
+  {test:function(n){return /гантел/.test(n)&&/(бицепс|супинац|молот)/.test(n)},k:.12,label:function(){return "Совет"}}
+];
+function dbSuggest(e,base){
+  var n=String(e.name).toLowerCase();
+  for(var i=0;i<DB_RULES.length;i++){var r=DB_RULES[i];if(r.test(n)){
+    var reps=parseInt(String(e.reps),10)||10;var adj=Math.max(.75,Math.min(1.15,1-(reps-10)*.035));
+    var kg=Math.max(2,Math.round(base*r.k*adj/2)*2);
+    return {kg:kg,label:r.label(n)};
+  }}
+  return null;
+}
+
+/* ---------- stats ---------- */
+var DORD={tue:0,thu:1};
+function orderedSessions(){return Object.keys(sessions).map(function(k){return sessions[k]}).sort(function(a,b){return a.c-b.c||a.w-b.w||DORD[a.d]-DORD[b.d]})}
+function exById(id){var all=cfg.days.tue.concat(cfg.days.thu);for(var i=0;i<all.length;i++)if(all[i].id===id)return all[i];return null}
+function doneSets(l,n){var k=0;if(l&&l.s)for(var i=0;i<n;i++)if(l.s[i])k++;return k}
+function sessStats(s){
+  var ton=0,sets=0,base=cyc(s.c).base;
+  Object.keys(s.ex||{}).forEach(function(id){
+    var e=exById(id),l=s.ex[id];if(!e)return;
+    if(isBench(e)){var sc=BENCH[e.type][s.w-1];
+      if(sc.test){var t=s.test||{};var d1=doneSets(l,1);sets+=d1;if(d1&&t.w&&t.r)ton+=t.w*t.r;return}
+      var d=doneSets(l,sc.s);sets+=d;ton+=d*sc.r*r25(base*sc.p);return}
+    var n=Math.max(1,parseInt(e.sets,10)||1),dd=doneSets(l,n);sets+=dd;
+    var w=l.w!=null?l.w:null,reps=parseInt(String(e.reps),10);
+    if(dd&&w&&reps)ton+=dd*reps*w;
+  });
+  return {ton:ton,sets:sets};
+}
+function tons(x){return x>=1000?fmt(Math.round(x/100)/10)+' т':fmt(Math.round(x))+' кг'}
+function sessLabel(s){return 'Ц'+s.c+' Н'+s.w+' '+DAYS[s.d]}
+
+function barChart(items,unit){
+  // items: [{k,label,v,txt}]
+  var W=340,H=170,pl=8,pr=8,pt=22,pb=26,n=items.length;
+  var max=0;items.forEach(function(it){if(it.v>max)max=it.v});if(!max)max=1;
+  var step=(W-pl-pr)/n,bw=Math.min(28,step*.62),o='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(unit)+'">';
+  o+='<line class="grid" x1="'+pl+'" x2="'+(W-pr)+'" y1="'+(H-pb)+'" y2="'+(H-pb)+'"/>';
+  var sel=ui.selBar,selIt=null;
+  items.forEach(function(it,i){
+    var h=Math.max(2,(H-pt-pb)*it.v/max),x=pl+step*i+(step-bw)/2,y=H-pb-h,isSel=sel===it.k||(!sel&&i===n-1);
+    if(isSel)selIt=it;
+    o+='<path class="bar'+(isSel?' sel':'')+'" d="M'+x+' '+(H-pb)+'V'+(y+4)+'q0 -4 4 -4h'+(bw-8)+'q4 0 4 4V'+(H-pb)+'Z"/>';
+    if(isSel)o+='<text class="val" x="'+(x+bw/2)+'" y="'+(y-6)+'" text-anchor="middle">'+esc(it.txt)+'</text>';
+    if(n<=8||i%Math.ceil(n/8)===0||i===n-1)o+='<text class="axis" x="'+(x+bw/2)+'" y="'+(H-8)+'" text-anchor="middle">'+esc(it.label)+'</text>';
+    o+='<rect class="hit" data-act="bar" data-k="'+esc(it.k)+'" x="'+(pl+step*i)+'" y="0" width="'+step+'" height="'+H+'"><title>'+esc(it.full||it.label)+': '+esc(it.txt)+'</title></rect>';
+  });
+  return {svg:o+'</svg>',sel:selIt};
+}
+
+function spark(vals){
+  if(vals.length<2)return '<svg class="spark" viewBox="0 0 72 26" aria-hidden="true"></svg>';
+  var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rg=mx-mn||1,pts=vals.map(function(v,i){return (3+i*(66/(vals.length-1))).toFixed(1)+','+(22-(v-mn)/rg*18).toFixed(1)});
+  var last=pts[pts.length-1].split(',');
+  return '<svg class="spark" viewBox="0 0 72 26" aria-hidden="true"><polyline points="'+pts.join(' ')+'"/><circle cx="'+last[0]+'" cy="'+last[1]+'" r="3"/></svg>';
+}
+
+function statsHTML(){
+  var all=orderedSessions(),active=[],done=0,totSets=0,totTon=0,last=null;
+  all.forEach(function(s){var st=sessStats(s);if(s.doneAt){done++;if(!last||s.doneAt>last)last=s.doneAt}if(st.sets||s.doneAt){active.push({s:s,st:st})}totSets+=st.sets;totTon+=st.ton});
+  var lastC=cfg.cycles[cfg.cycles.length-1],planned=0,doneCur=0;
+  for(var w=1;w<=6;w++)["tue","thu"].forEach(function(d){var s=sessions[key(lastC.n,w,d)];if(s&&s.doneAt)doneCur++});
+  var o='';
+  o+='<div class="tiles">'+
+    '<div class="tile"><b>'+done+'</b><span>тренировок выполнено</span></div>'+
+    '<div class="tile"><b>'+totSets+'</b><span>подходов отмечено</span></div>'+
+    '<div class="tile"><b>'+tons(totTon)+'</b><span>поднято всего (вес × повторы)</span></div>'+
+    '<div class="tile"><b>'+doneCur+'<small style="font-size:18px"> / 12</small></b><span>тренировок в цикле '+lastC.n+'</span></div>'+
+  '</div>';
+  if(!active.length){
+    o+='<div class="panel"><h3>Пока пусто</h3><p class="cap">Отмечайте подходы и нажимайте «Выполнено» после тренировки. Здесь появятся объём по тренировкам, рост максимума в жиме и веса по каждому упражнению.</p></div>';
+    return o;
+  }
+  // bench max by cycle
+  var mx=cfg.cycles.map(function(cy){var t=sessions[key(cy.n,6,"tue")],est=(t&&t.test&&t.test.w&&t.test.r)?r25(t.test.w*(1+t.test.r/30)):null;return {n:cy.n,base:cy.base,est:est}});
+  o+='<div class="panel"><h3>Максимум в жиме</h3>';
+  if(mx.length>1){
+    var bc=barChart(mx.map(function(m){return {k:'c'+m.n,label:'Ц'+m.n,full:'Цикл '+m.n,v:m.base,txt:fmt(m.base)+' кг'}}),'Максимум по циклам');
+    o+=bc.svg;
+    var first=mx[0].base,lastB=mx[mx.length-1].base;o+='<p class="cap">С начала: '+fmt(first)+' → '+fmt(lastB)+' кг ('+(lastB-first>=0?'+':'')+fmt(lastB-first)+' кг). Нажмите на столбик, чтобы увидеть значение.</p>';
+  }else{
+    o+='<div class="tile" style="padding:0"><b>'+fmt(mx[0].base)+' кг</b><span>максимум цикла 1. График появится, когда начнёте цикл 2.</span></div>';
+  }
+  var ests=mx.filter(function(m){return m.est});
+  if(ests.length)o+='<p class="cap">Проверки на 6-й неделе: '+ests.map(function(m){return 'цикл '+m.n+' ≈ '+fmt(m.est)+' кг'}).join(', ')+'.</p>';
+  o+='</div>';
+  // tonnage per workout
+  var recent=active.slice(-12);
+  var tc=barChart(recent.map(function(a){return {k:sessLabel(a.s),label:'Н'+a.s.w+DAYS[a.s.d].charAt(0),full:sessLabel(a.s),v:a.st.ton,txt:tons(a.st.ton)}}),'Объём по тренировкам');
+  o+='<div class="panel"><h3>Объём по тренировкам</h3>'+tc.svg+'<p class="cap">'+(tc.sel?(tc.sel.full+': '+tc.sel.txt+', подходов: '+(recent.filter(function(a){return sessLabel(a.s)===tc.sel.k})[0]||{st:{sets:0}}).st.sets):'')+'. Последние '+recent.length+' тренировок, подпись: неделя и день (В — вторник, Ч — четверг).</p></div>';
+  // per exercise progression
+  var rows='';
+  ["tue","thu"].forEach(function(d){cfg.days[d].forEach(function(e){
+    if(isBench(e))return;
+    var vals=[];all.forEach(function(s){var l=s.ex&&s.ex[e.id];if(l&&l.w!=null&&doneSets(l,Math.max(1,parseInt(e.sets,10)||1)))vals.push(l.w)});
+    if(!vals.length)return;
+    var dlt=vals[vals.length-1]-vals[0];
+    rows+='<div class="exrow"><div class="nm">'+esc(e.name)+'<small>'+DAYS[d]+' · '+vals.length+' трен. · сейчас '+fmt(vals[vals.length-1])+' кг</small></div>'+spark(vals)+'<div class="dl'+(dlt>0?' up':'')+'">'+(dlt>0?'+':'')+fmt(dlt)+' кг</div></div>';
+  })});
+  o+='<div class="panel"><h3>Рост весов</h3>'+(rows||'<p class="cap">Появится, когда отметите подходы с указанным весом.</p>')+'</div>';
+  // log
+  var lg='';active.slice().reverse().slice(0,10).forEach(function(a){lg+='<div class="exrow" style="grid-template-columns:minmax(0,1fr) auto"><div class="nm">Цикл '+a.s.c+' · Неделя '+a.s.w+' · '+DAYN[a.s.d]+'<small>'+(a.s.doneAt?'выполнено '+dstr(a.s.doneAt):'не отмечена как выполненная')+' · подходов: '+a.st.sets+'</small></div><div class="dl">'+tons(a.st.ton)+'</div></div>'});
+  o+='<div class="panel"><h3>Последние тренировки</h3>'+lg+'</div>';
+  return o;
+}
+
 /* ---------- actions ---------- */
 function findEx(id){var l=cfg.days[cfg.cur.d];for(var i=0;i<l.length;i++)if(l[i].id===id)return {e:l[i],i:i,l:l};return null}
 function logFor(id,create){var s=sess(curKey(),create);if(!s)return null;s.ex=s.ex||{};if(!s.ex[id]&&create)s.ex[id]={s:[],w:null};return s.ex[id]}
@@ -354,7 +505,10 @@ document.addEventListener("click",function(ev){
   if(a!=="del")ui.delArm=null;
   if(a!=="reset")ui.resetArm=false;
   switch(a){
-    case "edit":ui.edit=!ui.edit;break;
+    case "edit":ui.edit=!ui.edit;ui.stats=false;break;
+    case "stats":ui.stats=true;ui.edit=false;ui.selBar=null;window.scrollTo(0,0);break;
+    case "bar":ui.selBar=b.dataset.k;break;
+    case "usesug":f=findEx(id);if(!f)return;l=logFor(id,true);l.w=+b.dataset.kg;f.e.weight=l.w;saveSess(curKey());saveCfg();break;
     case "settings":ui.settings=true;ui.hlCycle=false;break;
     case "close":ui.settings=false;ui.backup=null;break;
     case "export":
@@ -368,8 +522,8 @@ document.addEventListener("click",function(ev){
       cfg=d.cfg;sessions=d.sessions||{};saveCfg();Object.keys(sessions).forEach(saveSess);ui.backup=null;ui.settings=false;toast("Данные загружены");break;
     case "cprev":return go(c.c-1,1,"tue");
     case "cnext":return go(c.c+1,1,"tue");
-    case "week":return go(c.c,+b.dataset.w,c.d);
-    case "day":return go(c.c,c.w,b.dataset.d);
+    case "week":ui.stats=false;return go(c.c,+b.dataset.w,c.d);
+    case "day":ui.stats=false;return go(c.c,c.w,b.dataset.d);
     case "goto":ui.settings=false;return go(+b.dataset.c,+b.dataset.w,b.dataset.d);
     case "set":
       f=findEx(id);if(!f)return;l=logFor(id,true);l.s=l.s||[];var i=+b.dataset.i;l.s[i]=!l.s[i];
@@ -419,7 +573,7 @@ document.addEventListener("change",function(ev){if(ev.target.dataset&&ev.target.
 
 var tt;function toast(m){var el=document.getElementById("toast");el.textContent=m;el.hidden=false;clearTimeout(tt);tt=setTimeout(function(){el.hidden=true},2600)}
 
-window.__back=function(){if(ui.settings){ui.settings=false;ui.backup=null;render();return true}if(ui.edit){ui.edit=false;render();return true}return false};
+window.__back=function(){if(ui.settings){ui.settings=false;ui.backup=null;render();return true}if(ui.stats){ui.stats=false;render();return true}if(ui.edit){ui.edit=false;render();return true}return false};
 render();
 setTimeout(connect,0);
 })();
