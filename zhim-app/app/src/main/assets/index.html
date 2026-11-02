@@ -1,0 +1,428 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><style>html{color-scheme:light}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>Жим ВТ/ЧТ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: phone-first workout log — sticky header (cycle, weeks, day tabs), exercise cards with set chips, fixed footer action */
+:root{
+  --bg:#ecebe6; --card:#fbfaf7; --ink:#151515; --muted:#62656a; --line:#d5d3cc;
+  --accent:#d0202a; --on-accent:#ffffff; --soft:#f7e2e1; --ok:#2f7a4c; --ok-soft:#e1efe6; --hdr:#151515; --hdr-fg:#f0efea;
+  --display:"Barlow Condensed","Arial Narrow","sans-serif-condensed",Impact,sans-serif;
+  --body:"Barlow","Segoe UI",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141516; --card:#1e2022; --ink:#f0efea; --muted:#9b9ea3; --line:#33363a;
+  --accent:#e8414a; --on-accent:#ffffff; --soft:#3a2124; --ok:#5fb582; --ok-soft:#1c3326; --hdr:#0b0c0d; --hdr-fg:#f0efea; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141516; --card:#1e2022; --ink:#f0efea; --muted:#9b9ea3; --line:#33363a;
+  --accent:#e8414a; --on-accent:#ffffff; --soft:#3a2124; --ok:#5fb582; --ok-soft:#1c3326; --hdr:#0b0c0d; --hdr-fg:#f0efea; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--hdr)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.pad{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.app{max-width:560px;margin:0 auto}
+
+/* header */
+.hdr{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--hdr);color:var(--hdr-fg);padding-block:10px 0;display:flex;flex-direction:column;gap:8px}
+.row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.brand{font-family:var(--display);font-weight:900;font-size:24px;letter-spacing:1px;text-transform:uppercase;line-height:1;white-space:nowrap}
+.brand span{color:var(--accent);margin:0 6px}
+.brand small{font-size:15px;font-weight:700;opacity:.75;letter-spacing:.5px}
+.hbtns{display:flex;gap:6px}
+.hbtn{background:transparent;border:1.5px solid color-mix(in srgb,var(--hdr-fg) 40%,transparent);color:var(--hdr-fg);border-radius:6px;padding:5px 10px;font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase}
+.hbtn.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.row2{display:flex;align-items:center;gap:8px}
+.cyc{display:flex;align-items:center;gap:2px;font-family:var(--display);font-weight:800;font-size:15px;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
+.cyc button{background:none;border:0;color:var(--hdr-fg);font-size:22px;line-height:1;padding:2px 6px}
+.cyc button:disabled{opacity:.25;cursor:default}
+.weeks{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;flex:1;min-width:0}
+.wk{background:color-mix(in srgb,var(--hdr-fg) 12%,transparent);border:0;color:var(--hdr-fg);border-radius:5px;padding:6px 0;font-family:var(--display);font-weight:800;font-size:15px;position:relative}
+.wk.cur{background:var(--hdr-fg);color:var(--hdr)}
+.wk.ok::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.tabs{display:grid;grid-template-columns:1fr 1fr}
+.tab{background:none;border:0;border-bottom:4px solid transparent;color:var(--hdr-fg);opacity:.6;padding:6px 0 7px;font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:1px;text-transform:uppercase;display:flex;justify-content:center;align-items:baseline;gap:6px}
+.tab small{font-size:13px;font-weight:600;letter-spacing:1px;opacity:.8}
+.tab.cur{opacity:1;border-bottom-color:var(--accent)}
+.tab .chk{color:var(--ok);font-size:16px}
+
+/* list */
+.list{display:flex;flex-direction:column;gap:10px;padding-block:14px 120px}
+.ex{background:var(--card);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;border:1.5px solid transparent}
+.ex.done{border-color:var(--ok);background:color-mix(in srgb,var(--ok-soft) 55%,var(--card))}
+.ex.main{border-left:5px solid var(--accent)}
+.exh{display:flex;gap:10px;align-items:flex-start}
+.num{font-family:var(--display);font-weight:900;font-size:22px;color:var(--accent);min-width:18px;line-height:1.05}
+.t{flex:1;min-width:0}
+.t h3{margin:0;font-size:16px;font-weight:700;line-height:1.2}
+.t p{margin:2px 0 0;font-size:13px;color:var(--muted);line-height:1.3}
+.rest{font-size:12px;color:var(--muted);white-space:nowrap;padding-top:2px}
+.exb{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.big{font-family:var(--display);font-weight:900;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.big small{font-size:17px;font-weight:700;margin-left:3px}
+.sr{font-family:var(--display);font-weight:800;font-size:22px;white-space:nowrap}
+.tag{font-family:var(--display);font-weight:700;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+.tag b{color:var(--accent)}
+.warm{font-size:12.5px;color:var(--muted);line-height:1.35}
+.wt{display:flex;align-items:center;gap:6px}
+.step{width:40px;height:40px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);font-size:22px;font-weight:600;line-height:1}
+.win{width:76px;height:40px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);text-align:center;font-family:var(--display);font-weight:800;font-size:22px}
+.wt span{font-family:var(--display);font-weight:700;color:var(--muted)}
+.sets{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-width:46px;height:42px;border-radius:21px;border:2px solid var(--line);background:transparent;font-family:var(--display);font-weight:800;font-size:16px;padding:0 12px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.test{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+.test input{width:70px;height:38px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);text-align:center;font-family:var(--display);font-weight:800;font-size:19px}
+.est{font-weight:700;color:var(--ok)}
+
+/* edit mode */
+.ed{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.ed label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);min-width:0}
+.ed label.w2{grid-column:span 3}
+.ed input{height:38px;border-radius:7px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);padding:0 9px;font:500 15px var(--body);min-width:0;width:100%}
+.edbar{display:flex;gap:6px;justify-content:flex-end}
+.mini{height:36px;padding:0 12px;border-radius:7px;border:1.5px solid var(--line);background:var(--bg);font-weight:600;font-size:14px}
+.mini.danger{border-color:var(--accent);color:var(--accent)}
+.mini.armed{background:var(--accent);color:var(--on-accent)}
+.mini:disabled{opacity:.35;cursor:default}
+.add{height:52px;border-radius:10px;border:2px dashed var(--line);background:transparent;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.hint{font-size:13px;color:var(--muted);margin:0}
+
+/* footer */
+.foot{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--card);border-top:1.5px solid var(--line);padding-block:10px calc(10px + env(safe-area-inset-bottom,0px))}
+.foot .in{max-width:560px;margin:0 auto;display:flex;align-items:center;gap:10px}
+.prog{flex:1;min-width:0;font-size:13px;color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--line);margin-top:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.primary{height:48px;padding:0 16px;border:0;border-radius:10px;background:var(--accent);color:var(--on-accent);font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+.primary.ok{background:var(--ok)}
+.ghost{height:48px;padding:0 12px;border-radius:10px;border:1.5px solid var(--line);background:transparent;font-weight:600;font-size:14px}
+
+/* settings */
+.sheet{position:fixed;inset:0;z-index:20;background:var(--bg);overflow-y:auto;padding-block:calc(14px + env(safe-area-inset-top,0px)) calc(24px + env(safe-area-inset-bottom,0px))}
+.sheet .app{display:flex;flex-direction:column;gap:14px}
+.shd{display:flex;justify-content:space-between;align-items:center}
+.shd h2{margin:0;font-family:var(--display);font-weight:900;font-size:28px;text-transform:uppercase;letter-spacing:1px}
+.box{background:var(--card);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.box h3{margin:0;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:1px;text-transform:uppercase}
+.box.hl{outline:3px solid var(--accent)}
+.fld{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fld input{width:96px;height:44px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);text-align:center;font-family:var(--display);font-weight:800;font-size:22px}
+.hist{display:flex;flex-direction:column}
+.hist button{display:flex;justify-content:space-between;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 0;text-align:left;font-size:14px}
+.hist button span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
+.store{font-size:13px;color:var(--muted)}
+.bk{width:100%;min-height:110px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:12px/1.3 ui-monospace,monospace;padding:8px;resize:vertical}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:30;max-width:calc(100% - 32px);text-align:center}
+.row1>*,.row2>*{min-width:0}
+@media (max-width:400px){
+  .brand{font-size:20px}.brand small{font-size:13px}
+  .hbtn{padding:5px 7px;font-size:12px;letter-spacing:.5px}
+  .row2{gap:4px}.cyc{font-size:13px}.cyc button{padding:2px 3px;font-size:20px}
+  .weeks{gap:3px}.wk{font-size:13px;padding:6px 0}
+  .tab{font-size:17px;gap:4px}.tab small{font-size:11px}
+  .big{font-size:30px}.sr{font-size:19px}
+  .step{width:36px;height:38px}.win{width:62px;height:38px;font-size:20px}
+  .chip{min-width:40px;height:40px;padding:0 9px}
+  .primary{font-size:16px;padding:0 12px}
+}
+@media (max-width:340px){.tab small{display:none}.brand small{display:none}.hbtn{font-size:11px;padding:4px 6px}}
+@media (prefers-reduced-motion:no-preference){.chip,.ex{transition:background .15s,border-color .15s}}
+</style>
+
+<div id="root"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+(function(){
+"use strict";
+var BENCH={
+  benchTue:[{p:.795,s:4,r:5},{p:.818,s:5,r:4},{p:.864,s:5,r:3},{p:.909,s:3,r:2},{p:.682,s:3,r:5,tag:"разгрузка"},{test:true}],
+  benchThu:[{p:.727,s:4,r:6},{p:.75,s:4,r:6},{p:.773,s:4,r:5},{p:.795,s:4,r:4},{p:.636,s:3,r:5,tag:"разгрузка"},{p:.636,s:3,r:5,tag:"легко после проверки"}]
+};
+var WARM={benchTue:[[0,10],[.4545,5],[.636,3],[.727,"1–2"]],benchThu:[[0,10],[.4545,5],[.59,3]]};
+var DAYN={tue:"Вторник",thu:"Четверг"}, DAYS={tue:"ВТ",thu:"ЧТ"};
+var LS="zhim-app-v1";
+
+function uid(){return Math.random().toString(36).slice(2,9)}
+function r25(x){return Math.round(x/2.5)*2.5}
+function fmt(n){return (n===null||n===undefined||n==="")?"":String(+n).replace(".",",")}
+function num(v){v=String(v).replace(",",".").trim();if(v==="")return null;var n=parseFloat(v);return isFinite(n)?n:null}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function today(){return new Date().toISOString().slice(0,10)}
+function dstr(iso){if(!iso)return"";var p=iso.slice(0,10).split("-");return p[2]+"."+p[1]+"."+p[0]}
+function ex(name,note,sets,reps,rest,type){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:null,type:type||"normal"}}
+
+function defaults(){
+  return {v:1,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+    days:{
+      tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue"),
+        ex("Жим на скамье 40°","",3,"8–10","2 мин"),
+        ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин"),
+        ex("Разгибание на трицепс","",3,"10–12","1,5 мин"),
+        ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин"),
+        ex("Подъёмы на икры","гантели в руках",4,"10–15","1 мин"),
+        ex("Пресс: планка + «мёртвый жук»","жук: 3 × 10 на сторону",3,"30–45 с","1 мин")],
+      thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu"),
+        ex("Жим на скамье 40°","легче, чем во вторник, или разводка",3,"10–12","1,5 мин"),
+        ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин"),
+        ex("Тяга гантелей лёжа на наклонной 30–45°","начните с 16–20 кг",3,"10–12","1,5 мин"),
+        ex("Разводка на плечи","",3,"12–15","1 мин"),
+        ex("Разгибание на трицепс","",3,"12–15","1 мин"),
+        ex("Подъём гантелей с супинацией","",3,"10–12","1 мин"),
+        ex("Подъёмы на икры","гантели в руках",4,"12–20","1 мин"),
+        ex("Пресс: боковая планка + «птица-собака»","птица-собака: 3 × 8 на сторону",3,"20–30 с","1 мин")]
+    }};
+}
+
+var cfg=defaults(), sessions={};
+var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null};
+var mode="local", col=null, timers={}, chains={};
+
+try{var cached=JSON.parse(localStorage.getItem(LS)||"null");if(cached&&cached.cfg){cfg=cached.cfg;sessions=cached.sessions||{}}}catch(e){}
+
+/* ---------- storage ---------- */
+function cacheLocal(){try{localStorage.setItem(LS,JSON.stringify({cfg:cfg,sessions:sessions}))}catch(e){}}
+function persist(id,data){
+  cacheLocal();
+  if(mode!=="db")return;
+  clearTimeout(timers[id]);
+  timers[id]=setTimeout(function(){
+    var body=JSON.parse(JSON.stringify(data));
+    chains[id]=(chains[id]||Promise.resolve()).then(function(){return col.doc(id).set(body)}).catch(function(){toast("Не удалось сохранить. Проверьте интернет.")});
+  },600);
+}
+function saveCfg(){cfg.updatedAt=Date.now();persist("config",cfg)}
+function saveSess(k){persist(k,sessions[k])}
+
+function connect(){
+  if(!window.claude||!window.claude.use){render();return}
+  Promise.all([window.claude.use("user"),window.claude.use("db")]).then(function(r){
+    var user=r[0],db=r[1];
+    if(!user||!db)return null;
+    return user.id().then(function(id){
+      if(!id)return null;
+      var c=db.collection("data/users/"+id);
+      var t;var to=new Promise(function(_,rej){t=setTimeout(function(){rej(new Error("timeout"))},10000)});
+      return Promise.race([c.get(),to]).then(function(snap){clearTimeout(t);return {c:c,snap:snap}});
+    });
+  }).then(function(res){
+    if(!res){render();return}
+    col=res.c;mode="db";
+    var remoteCfg=null,remoteS={};
+    res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
+    if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
+      cfg=remoteCfg;
+      Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
+      cacheLocal();
+    }else{
+      persist("config",cfg);
+      Object.keys(sessions).forEach(function(k){persist(k,sessions[k])});
+    }
+    render();
+  }).catch(function(){mode="local";render()});
+}
+
+/* ---------- model helpers ---------- */
+function cyc(n){for(var i=0;i<cfg.cycles.length;i++)if(cfg.cycles[i].n===n)return cfg.cycles[i];return cfg.cycles[cfg.cycles.length-1]}
+function key(c,w,d){return "s_c"+c+"w"+w+d}
+function curKey(){return key(cfg.cur.c,cfg.cur.w,cfg.cur.d)}
+function sess(k,create){if(!sessions[k]&&create){var p=/s_c(\d+)w(\d)(\w+)/.exec(k);sessions[k]={c:+p[1],w:+p[2],d:p[3],ex:{},test:{},doneAt:null}}return sessions[k]}
+function isBench(e){return e.type==="benchTue"||e.type==="benchThu"}
+function scheme(e){return BENCH[e.type][cfg.cur.w-1]}
+function setCount(e){if(isBench(e)){var s=scheme(e);return s.test?1:s.s}return Math.max(1,parseInt(e.sets,10)||1)}
+function exLog(s,id){return s&&s.ex&&s.ex[id]}
+function exDone(s,e){var l=exLog(s,e.id),n=setCount(e);if(!l||!l.s)return false;for(var i=0;i<n;i++)if(!l.s[i])return false;return true}
+function dayDone(c,w,d){var s=sessions[key(c,w,d)];return !!(s&&s.doneAt)}
+
+/* ---------- render ---------- */
+var root=document.getElementById("root");
+function render(){
+  var c=cfg.cur,base=cyc(c.c).base,s=sessions[curKey()],list=cfg.days[c.d];
+  var h='';
+  h+='<header class="hdr pad"><div class="app" style="display:flex;flex-direction:column;gap:8px">';
+  h+='<div class="row1"><div class="brand">Жим<span>/</span><small>'+fmt(base)+' кг</small></div><div class="hbtns">'+
+     '<button class="hbtn'+(ui.edit?' on':'')+'" data-act="edit">'+(ui.edit?'Готово':'Изменить')+'</button>'+
+     '<button class="hbtn" data-act="settings">Настройки</button></div></div>';
+  h+='<div class="row2"><div class="cyc"><button data-act="cprev" aria-label="Предыдущий цикл"'+(c.c<=1?' disabled':'')+'>‹</button>Цикл '+c.c+
+     '<button data-act="cnext" aria-label="Следующий цикл"'+(c.c>=cfg.cycles.length?' disabled':'')+'>›</button></div><div class="weeks">';
+  for(var w=1;w<=6;w++){var ok=dayDone(c.c,w,"tue")&&dayDone(c.c,w,"thu");h+='<button class="wk'+(w===c.w?' cur':'')+(ok?' ok':'')+'" data-act="week" data-w="'+w+'">Н'+w+'</button>'}
+  h+='</div></div><div class="tabs">';
+  ["tue","thu"].forEach(function(d){h+='<button class="tab'+(d===c.d?' cur':'')+'" data-act="day" data-d="'+d+'">'+DAYN[d]+'<small>'+(d==="tue"?"сила":"объём")+'</small>'+(dayDone(c.c,c.w,d)?'<span class="chk">✓</span>':'')+'</button>'});
+  h+='</div></div></header>';
+
+  h+='<main class="pad"><div class="app list">';
+  if(ui.edit)h+='<p class="hint">Изменения в упражнениях действуют на все недели. Веса жима лёжа считаются от максимума цикла, его меняют в настройках.</p>';
+  list.forEach(function(e,i){h+=ui.edit?editCard(e,i,list.length):viewCard(e,i,s,base)});
+  if(ui.edit)h+='<button class="add" data-act="add">+ Добавить упражнение</button>';
+  if(!list.length&&!ui.edit)h+='<p class="hint">В этот день пока нет упражнений. Нажмите «Изменить», чтобы добавить.</p>';
+  h+='</div></main>';
+
+  if(!ui.edit){
+    var total=list.length,done=0;list.forEach(function(e){if(exDone(s,e))done++});
+    h+='<footer class="foot pad"><div class="in">';
+    if(s&&s.doneAt){
+      h+='<div class="prog"><b style="color:var(--ok)">Выполнено '+dstr(s.doneAt)+'</b><br><button data-act="undone" style="background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;font-size:13px">отменить отметку</button></div>';
+      h+='<button class="primary" data-act="next">'+nextLabel()+' →</button>';
+    }else{
+      h+='<div class="prog">'+done+' из '+total+' упражнений<div class="bar"><i style="width:'+(total?Math.round(done/total*100):0)+'%"></i></div></div>';
+      h+='<button class="primary ok" data-act="finish">✓ Выполнено</button>';
+    }
+    h+='</div></footer>';
+  }
+  if(ui.settings)h+=settingsHTML();
+  root.innerHTML=h;
+}
+
+function nextLabel(){var c=cfg.cur;if(c.d==="tue")return "Четверг";if(c.w<6)return "Неделя "+(c.w+1);return "Новый цикл"}
+
+function chips(s,e){var n=setCount(e),l=exLog(s,e.id),o='<div class="sets">';for(var i=0;i<n;i++){var on=l&&l.s&&l.s[i];o+='<button class="chip'+(on?' on':'')+'" data-act="set" data-id="'+e.id+'" data-i="'+i+'" aria-pressed="'+(on?'true':'false')+'">'+(n===1&&isBench(e)&&scheme(e).test?'Сделано':(i+1))+'</button>'}return o+'</div>'}
+
+function head(e,i){return '<div class="exh"><span class="num">'+(i+1)+'</span><div class="t"><h3>'+esc(e.name)+'</h3>'+(e.note?'<p>'+esc(e.note)+'</p>':'')+'</div><span class="rest">'+esc(e.rest)+'</span></div>'}
+
+function viewCard(e,i,s,base){
+  var done=exDone(s,e),o='<article class="ex'+(isBench(e)?' main':'')+(done?' done':'')+'">'+head(e,i);
+  if(isBench(e)){
+    var sc=scheme(e);
+    var warm=WARM[e.type].map(function(x){return (x[0]===0?'гриф':fmt(r25(base*x[0])))+'×'+x[1]});
+    if(e.type==="benchTue"&&cfg.cur.w===4)warm.push(fmt(r25(base*.818))+'×1');
+    if(sc.test){
+      var t=(s&&s.test)||{};var a=r25(base*.955),b=r25(base*.977);
+      o+='<div class="exb"><div><div class="big">Проверка</div><div class="tag">максимум на 2–3 повтора</div></div><div class="sr">'+fmt(a)+' × 3<br>или '+fmt(b)+' × 2</div></div>';
+      o+='<div class="test">Результат: <input data-in="tw" inputmode="decimal" placeholder="кг" value="'+fmt(t.w)+'" aria-label="Вес в проверке"> × <input data-in="tr" inputmode="numeric" placeholder="повт" value="'+fmt(t.r)+'" aria-label="Повторы в проверке"> <span class="est" id="est">'+estText(t)+'</span></div>';
+    }else{
+      o+='<div class="exb"><div><div class="big">'+fmt(r25(base*sc.p))+'<small>кг</small></div><div class="tag">'+Math.round(sc.p*100)+'% от максимума'+(sc.tag?' · <b>'+sc.tag+'</b>':'')+'</div></div><div class="sr">'+sc.s+' × '+sc.r+'</div></div>';
+    }
+    o+='<div class="warm">Подводящие: '+warm.join(' · ')+'</div>';
+  }else{
+    var l=exLog(s,e.id),wv=(l&&l.w!=null)?l.w:e.weight;
+    o+='<div class="exb"><div class="wt"><button class="step" data-act="wminus" data-id="'+e.id+'" aria-label="Меньше вес">−</button><input class="win" data-in="w" data-id="'+e.id+'" inputmode="decimal" placeholder="—" value="'+fmt(wv)+'" aria-label="Рабочий вес, кг"><span>кг</span><button class="step" data-act="wplus" data-id="'+e.id+'" aria-label="Больше вес">+</button></div><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>';
+  }
+  return o+chips(s,e)+'</article>';
+}
+
+function estText(t){if(t&&t.w&&t.r){return '≈ '+fmt(r25(t.w*(1+t.r/30)))+' кг максимум'}return ''}
+
+function editCard(e,i,n){
+  var o='<article class="ex'+(isBench(e)?' main':'')+'"><div class="ed">';
+  o+='<label class="w2">Название<input data-in="name" data-id="'+e.id+'" value="'+esc(e.name)+'"></label>';
+  o+='<label class="w2">Заметка<input data-in="note" data-id="'+e.id+'" value="'+esc(e.note)+'" placeholder="хват, техника…"></label>';
+  if(!isBench(e)){
+    o+='<label>Подходы<input data-in="sets" data-id="'+e.id+'" inputmode="numeric" value="'+esc(e.sets)+'"></label>';
+    o+='<label>Повторы<input data-in="reps" data-id="'+e.id+'" value="'+esc(e.reps)+'"></label>';
+  }
+  o+='<label'+(isBench(e)?' class="w2"':'')+'>Отдых<input data-in="rest" data-id="'+e.id+'" value="'+esc(e.rest)+'"></label>';
+  o+='</div>';
+  if(isBench(e))o+='<p class="hint">Подходы и веса жима считаются по волне от максимума цикла.</p>';
+  o+='<div class="edbar"><button class="mini" data-act="up" data-id="'+e.id+'"'+(i===0?' disabled':'')+' aria-label="Выше">↑</button><button class="mini" data-act="down" data-id="'+e.id+'"'+(i===n-1?' disabled':'')+' aria-label="Ниже">↓</button>';
+  o+='<button class="mini danger'+(ui.delArm===e.id?' armed':'')+'" data-act="del" data-id="'+e.id+'">'+(ui.delArm===e.id?'Точно удалить?':'Удалить')+'</button></div>';
+  return o+'</article>';
+}
+
+function settingsHTML(){
+  var c=cfg.cur,cur=cyc(c.c),last=cfg.cycles[cfg.cycles.length-1];
+  var lt=sessions[key(last.n,6,"tue")],est=lt&&lt.test&&lt.test.w&&lt.test.r?r25(lt.test.w*(1+lt.test.r/30)):null;
+  var o='<section class="sheet pad"><div class="app"><div class="shd"><h2>Настройки</h2><button class="primary" data-act="close">Закрыть</button></div>';
+  o+='<div class="box"><h3>Максимум цикла '+cur.n+'</h3><div class="fld"><input id="baseIn" data-in="base" inputmode="decimal" value="'+fmt(cur.base)+'" aria-label="Максимум, кг"><span>кг · от него считаются веса жима</span></div></div>';
+  o+='<div class="box'+(ui.hlCycle?' hl':'')+'"><h3>Новый цикл '+(last.n+1)+'</h3><p class="hint">Начинайте после 6-й недели. Обычно максимум +2,5 кг к прошлому циклу'+(est?'. По вашей проверке: ≈ '+fmt(est)+' кг':'')+'.</p>';
+  o+='<div class="fld"><input id="newBase" inputmode="decimal" value="'+fmt(r25(last.base+2.5))+'" aria-label="Максимум нового цикла, кг"><span>кг</span><button class="primary" data-act="newcycle">Начать цикл '+(last.n+1)+'</button></div></div>';
+  var hist=Object.keys(sessions).map(function(k){return sessions[k]}).filter(function(x){return x.doneAt}).sort(function(a,b){return a.doneAt<b.doneAt?1:-1});
+  o+='<div class="box"><h3>История</h3>';
+  if(!hist.length)o+='<p class="hint">Здесь появятся тренировки, отмеченные как выполненные.</p>';
+  else{o+='<div class="hist">';hist.forEach(function(x){o+='<button data-act="goto" data-c="'+x.c+'" data-w="'+x.w+'" data-d="'+x.d+'"><span>Цикл '+x.c+' · Неделя '+x.w+' · '+DAYS[x.d]+'</span><span>'+dstr(x.doneAt)+'</span></button>'});o+='</div>'}
+  o+='</div>';
+  o+='<div class="box"><h3>Резервная копия</h3><p class="hint">Перед переустановкой приложения или переходом на другой телефон скопируйте данные, а потом вставьте их обратно.</p><div class="fld"><button class="mini" data-act="export">Скопировать данные</button><button class="mini" data-act="importShow">Вставить данные</button></div>';
+  if(ui.backup==="export")o+='<textarea id="bkOut" class="bk" readonly aria-label="Данные для копирования">'+esc(JSON.stringify({cfg:cfg,sessions:sessions}))+'</textarea>';
+  if(ui.backup==="import")o+='<textarea id="bkIn" class="bk" placeholder="Вставьте сюда скопированные данные" aria-label="Данные для загрузки"></textarea><button class="primary" data-act="import" style="align-self:flex-start">Загрузить</button>';
+  o+='</div>';
+  o+='<div class="box"><h3>Данные</h3><p class="store">'+(mode==="db"?'Сохраняются в вашем аккаунте Claude: видны только вам, на любом устройстве.':'Сохраняются только на этом устройстве.')+'</p>';
+  o+='<button class="mini danger'+(ui.resetArm?' armed':'')+'" data-act="reset" style="align-self:flex-start">'+(ui.resetArm?'Точно стереть всё?':'Сбросить всё к началу')+'</button></div>';
+  return o+'</div></section>';
+}
+
+/* ---------- actions ---------- */
+function findEx(id){var l=cfg.days[cfg.cur.d];for(var i=0;i<l.length;i++)if(l[i].id===id)return {e:l[i],i:i,l:l};return null}
+function logFor(id,create){var s=sess(curKey(),create);if(!s)return null;s.ex=s.ex||{};if(!s.ex[id]&&create)s.ex[id]={s:[],w:null};return s.ex[id]}
+function go(c,w,d){cfg.cur={c:c,w:w,d:d};ui.delArm=null;saveCfg();render();window.scrollTo(0,0)}
+
+document.addEventListener("click",function(ev){
+  var b=ev.target.closest("[data-act]");if(!b||b.disabled)return;
+  var a=b.dataset.act,id=b.dataset.id,c=cfg.cur,f,l;
+  if(a!=="del")ui.delArm=null;
+  if(a!=="reset")ui.resetArm=false;
+  switch(a){
+    case "edit":ui.edit=!ui.edit;break;
+    case "settings":ui.settings=true;ui.hlCycle=false;break;
+    case "close":ui.settings=false;ui.backup=null;break;
+    case "export":
+      ui.backup="export";render();var ta=document.getElementById("bkOut");
+      try{navigator.clipboard.writeText(ta.value).then(function(){toast("Данные скопированы")},function(){ta.select();toast("Выделите текст и скопируйте его")})}catch(e){ta.select();toast("Выделите текст и скопируйте его")}
+      return;
+    case "importShow":ui.backup="import";break;
+    case "import":
+      var d=null;try{d=JSON.parse(document.getElementById("bkIn").value)}catch(e){}
+      if(!d||!d.cfg||!d.cfg.days||!d.cfg.cycles){toast("Это не похоже на данные приложения");return}
+      cfg=d.cfg;sessions=d.sessions||{};saveCfg();Object.keys(sessions).forEach(saveSess);ui.backup=null;ui.settings=false;toast("Данные загружены");break;
+    case "cprev":return go(c.c-1,1,"tue");
+    case "cnext":return go(c.c+1,1,"tue");
+    case "week":return go(c.c,+b.dataset.w,c.d);
+    case "day":return go(c.c,c.w,b.dataset.d);
+    case "goto":ui.settings=false;return go(+b.dataset.c,+b.dataset.w,b.dataset.d);
+    case "set":
+      f=findEx(id);if(!f)return;l=logFor(id,true);l.s=l.s||[];var i=+b.dataset.i;l.s[i]=!l.s[i];
+      if(!isBench(f.e)&&l.w==null&&f.e.weight!=null)l.w=f.e.weight;
+      saveSess(curKey());break;
+    case "wplus":case "wminus":
+      f=findEx(id);if(!f)return;l=logFor(id,true);var v=(l.w!=null?l.w:f.e.weight)||0;v=Math.max(0,v+(a==="wplus"?2.5:-2.5));l.w=v;f.e.weight=v;saveSess(curKey());saveCfg();break;
+    case "finish":var s=sess(curKey(),true);s.doneAt=today();saveSess(curKey());toast(DAYN[c.d]+", неделя "+c.w+": выполнено");break;
+    case "undone":sessions[curKey()].doneAt=null;saveSess(curKey());break;
+    case "next":
+      if(c.d==="tue")return go(c.c,c.w,"thu");
+      if(c.w<6)return go(c.c,c.w+1,"tue");
+      if(c.c<cfg.cycles.length)return go(c.c+1,1,"tue");
+      ui.settings=true;ui.hlCycle=true;break;
+    case "up":case "down":
+      f=findEx(id);if(!f)return;var j=f.i+(a==="up"?-1:1);if(j<0||j>=f.l.length)return;var tmp=f.l[j];f.l[j]=f.e;f.l[f.i]=tmp;saveCfg();break;
+    case "del":
+      if(ui.delArm!==id){ui.delArm=id;break}
+      f=findEx(id);if(f){f.l.splice(f.i,1);saveCfg()}ui.delArm=null;break;
+    case "add":
+      var ne=ex("Новое упражнение","",3,"10–12","1,5 мин");cfg.days[c.d].push(ne);saveCfg();render();
+      var inp=root.querySelector('[data-in="name"][data-id="'+ne.id+'"]');if(inp){inp.focus();inp.select()}return;
+    case "newcycle":
+      var nb=num(document.getElementById("newBase").value);if(!nb||nb<20){toast("Введите максимум в кг, например 112,5");return}
+      var last=cfg.cycles[cfg.cycles.length-1];cfg.cycles.push({n:last.n+1,base:nb,started:today()});ui.settings=false;ui.hlCycle=false;
+      toast("Цикл "+(last.n+1)+" начат, максимум "+fmt(nb)+" кг");return go(last.n+1,1,"tue");
+    case "reset":
+      if(!ui.resetArm){ui.resetArm=true;break}
+      var old=Object.keys(sessions);cfg=defaults();sessions={};ui.resetArm=false;ui.settings=false;saveCfg();
+      if(mode==="db")old.forEach(function(k){clearTimeout(timers[k]);chains[k]=(chains[k]||Promise.resolve()).then(function(){return col.doc(k).delete()}).catch(function(){})});
+      cacheLocal();toast("Данные сброшены");break;
+  }
+  render();
+});
+
+document.addEventListener("input",function(ev){
+  var t=ev.target,k=t.dataset&&t.dataset.in;if(!k)return;
+  var id=t.dataset.id,f;
+  if(k==="w"){f=findEx(id);if(!f)return;var v=num(t.value);var l=logFor(id,true);l.w=v;f.e.weight=v;saveSess(curKey());saveCfg();return}
+  if(k==="tw"||k==="tr"){var s=sess(curKey(),true);s.test=s.test||{};s.test[k==="tw"?"w":"r"]=num(t.value);saveSess(curKey());var e=document.getElementById("est");if(e)e.textContent=estText(s.test);return}
+  if(k==="base"){var b=num(t.value);if(b&&b>=20){cyc(cfg.cur.c).base=b;saveCfg()}return}
+  f=findEx(id);if(!f)return;
+  if(k==="sets"){var n=parseInt(t.value,10);if(n>=1&&n<=12)f.e.sets=n}else f.e[k]=t.value;
+  saveCfg();
+});
+document.addEventListener("change",function(ev){if(ev.target.dataset&&ev.target.dataset.in==="base")render()});
+
+var tt;function toast(m){var el=document.getElementById("toast");el.textContent=m;el.hidden=false;clearTimeout(tt);tt=setTimeout(function(){el.hidden=true},2600)}
+
+window.__back=function(){if(ui.settings){ui.settings=false;ui.backup=null;render();return true}if(ui.edit){ui.edit=false;render();return true}return false};
+render();
+setTimeout(connect,0);
+})();
+</script>
+
+</body></html>
