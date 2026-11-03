@@ -208,12 +208,12 @@ function dstr(iso){if(!iso)return"";var p=iso.slice(0,10).split("-");return p[2]
 function ex(name,note,sets,reps,rest,type,weight,step){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:weight==null?null:weight,step:step==null?2.5:step,type:type||"normal"}}
 
 function defaults(){
-  return {v:3,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+  return {v:4,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
     days:{
       tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue",null,0),
         ex("Жим гантелей на скамье 40°","вес одной гантели",3,"8–10","2 мин",null,30,2),
         ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин",null,65,2.5),
-        ex("Жим сведённых гантелей лёжа","гантели прижаты друг к другу всю амплитуду; вес одной",3,"10–12","1,5 мин",null,20,2),
+        ex("Тяга гантели одной рукой с упором в скамью","рука и колено на скамье, спина ровная; вес одной",3,"10–12","1,5 мин",null,28,2),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"10–12","1,5 мин",null,30,2.5),
         ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин",null,35,2.5),
         ex("Подъёмы на икры","гантели в руках, вес одной",4,"10–15","1 мин",null,24,2),
@@ -221,10 +221,10 @@ function defaults(){
       thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu",null,0),
         ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,32,2),
         ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин",null,60,2.5),
+        ex("Тяга каната к лицу на верхнем блоке","face pull: локти высоко, разводите канат к ушам",3,"12–15","1 мин",null,20,2.5),
         ex("Разводка на плечи","вес одной гантели, без рывков",3,"12–15","1 мин",null,8,1),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"12–15","1 мин",null,25,2.5),
         ex("Подъём гантелей с супинацией","вес одной гантели",3,"10–12","1 мин",null,14,2),
-        ex("Подъёмы на икры","гантели в руках, вес одной",4,"12–20","1 мин",null,20,2),
         ex("Пресс: боковая планка + «птица-собака»","птица-собака: 8 на сторону",4,"20–30 с","1 мин",null,null,0)]
     }};
 }
@@ -272,6 +272,24 @@ function migrate(c){
     }
     c.v=3;c.updatedAt=Date.now();
   }
+  if(c.v<4){
+    // v4: 8 exercises per day, balanced pushing and pulling.
+    // Tue: squeeze press -> one-arm dumbbell row. Thu: + face pull, - calves.
+    var t4=c.days.tue||[];
+    t4=t4.filter(function(e){return !/свед|вместе/i.test(e.name)});
+    if(!t4.some(function(e){return /одной рукой/i.test(e.name)})){
+      var pi4=-1;t4.forEach(function(e,i){if(pi4<0&&/тяга верхнего блока/i.test(e.name))pi4=i});
+      t4.splice(pi4>=0?pi4+1:Math.min(3,t4.length),0,ex("Тяга гантели одной рукой с упором в скамью","рука и колено на скамье, спина ровная; вес одной",3,"10–12","1,5 мин",null,28,2));
+    }
+    c.days.tue=t4;
+    var h4=(c.days.thu||[]).filter(function(e){return !/тяга гантелей лёжа/i.test(e.name)&&!/^подъёмы на икры/i.test(e.name)});
+    if(!h4.some(function(e){return /к лицу|face pull/i.test(e.name)})){
+      var qi=-1;h4.forEach(function(e,i){if(qi<0&&/тяга верхнего блока/i.test(e.name))qi=i});
+      h4.splice(qi>=0?qi+1:Math.min(3,h4.length),0,ex("Тяга каната к лицу на верхнем блоке","face pull: локти высоко, разводите канат к ушам",3,"12–15","1 мин",null,20,2.5));
+    }
+    c.days.thu=h4;
+    c.v=4;c.updatedAt=Date.now();
+  }
   return c;
 }
 var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
@@ -310,7 +328,7 @@ function connect(){
     var remoteCfg=null,remoteS={};
     res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
     if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
-      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<3)persist("config",cfg);
+      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<4)persist("config",cfg);
       Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
       cacheLocal();
     }else{
@@ -488,6 +506,7 @@ var DB_RULES=[
   {test:function(n){return /развод/.test(n)&&/плеч|стороны|дельт/.test(n)},k:.07,label:function(){return "Совет"}},
   {test:function(n){return /махи/.test(n)},k:.07,label:function(){return "Совет"}},
   {test:function(n){return /развод/.test(n)},k:.12,label:function(){return "Совет"}},
+  {test:function(n){return /тяга/.test(n)&&/гантел/.test(n)&&/одной рукой/.test(n)},k:.25,label:function(){return "Совет"}},
   {test:function(n){return /тяга/.test(n)&&/гантел/.test(n)},k:.17,label:function(){return "Совет"}},
   {test:function(n){return /француз/.test(n)&&/гантел/.test(n)},k:.14,label:function(){return "Совет"}},
   {test:function(n){return /гантел/.test(n)&&/(бицепс|супинац|молот)/.test(n)},k:.12,label:function(){return "Совет"}}
