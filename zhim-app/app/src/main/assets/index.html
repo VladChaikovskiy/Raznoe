@@ -208,11 +208,12 @@ function dstr(iso){if(!iso)return"";var p=iso.slice(0,10).split("-");return p[2]
 function ex(name,note,sets,reps,rest,type,weight,step){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:weight==null?null:weight,step:step==null?2.5:step,type:type||"normal"}}
 
 function defaults(){
-  return {v:2,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+  return {v:3,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
     days:{
       tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue",null,0),
-        ex("Жим на скамье 40°","штанга; гантелями — ~30 кг в руке",3,"8–10","2 мин",null,65,2.5),
+        ex("Жим гантелей на скамье 40°","вес одной гантели",3,"8–10","2 мин",null,30,2),
         ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин",null,65,2.5),
+        ex("Жим сведённых гантелей лёжа","гантели прижаты друг к другу всю амплитуду; вес одной",3,"10–12","1,5 мин",null,20,2),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"10–12","1,5 мин",null,30,2.5),
         ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин",null,35,2.5),
         ex("Подъёмы на икры","гантели в руках, вес одной",4,"10–15","1 мин",null,24,2),
@@ -220,7 +221,6 @@ function defaults(){
       thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu",null,0),
         ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,32,2),
         ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин",null,60,2.5),
-        ex("Тяга гантелей лёжа на наклонной 30–45°","вес одной гантели",3,"10–12","1,5 мин",null,18,2),
         ex("Разводка на плечи","вес одной гантели, без рывков",3,"12–15","1 мин",null,8,1),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"12–15","1 мин",null,25,2.5),
         ex("Подъём гантелей с супинацией","вес одной гантели",3,"10–12","1 мин",null,14,2),
@@ -260,6 +260,18 @@ function migrate(c){
     });
     c.v=2;c.updatedAt=Date.now();
   }
+  if(c.v<3){
+    // v3: incline press with dumbbells, squeeze press on Tuesday, no dumbbell row on Thursday
+    var tue=c.days.tue||[],thu=c.days.thu||[];
+    tue.forEach(function(e){if(e.name==="Жим на скамье 40°"){e.name="Жим гантелей на скамье 40°";e.note="вес одной гантели";e.step=2;if(e.weight==null||e.weight>40)e.weight=30}});
+    c.days.thu=thu.filter(function(e){return !/тяга гантелей лёжа/i.test(e.name)});
+    if(!tue.some(function(e){return /свед|вместе/i.test(e.name)})){
+      var pi=-1;tue.forEach(function(e,i){if(pi<0&&/тяга верхнего блока/i.test(e.name))pi=i});
+      var sq=ex("Жим сведённых гантелей лёжа","гантели прижаты друг к другу всю амплитуду; вес одной",3,"10–12","1,5 мин",null,20,2);
+      tue.splice(pi>=0?pi+1:Math.min(2,tue.length),0,sq);
+    }
+    c.v=3;c.updatedAt=Date.now();
+  }
   return c;
 }
 var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
@@ -298,7 +310,7 @@ function connect(){
     var remoteCfg=null,remoteS={};
     res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
     if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
-      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<2)persist("config",cfg);
+      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<3)persist("config",cfg);
       Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
       cacheLocal();
     }else{
@@ -471,6 +483,7 @@ function plan(e){
 // Per-hand dumbbell weight for ~10 reps as a share of the barbell bench max.
 var DB_RULES=[
   {test:function(n){return /жим/.test(n)&&/(наклон|30°|40°|45°|30-45|30–45)/.test(n)},k:.25,label:function(n){return /гантел/.test(n)?"Совет":"Если гантелями"}},
+  {test:function(n){return /жим/.test(n)&&/(свед|вместе)/.test(n)},k:.18,label:function(){return "Совет"}},
   {test:function(n){return /жим/.test(n)&&/гантел/.test(n)},k:.29,label:function(){return "Совет"}},
   {test:function(n){return /развод/.test(n)&&/плеч|стороны|дельт/.test(n)},k:.07,label:function(){return "Совет"}},
   {test:function(n){return /махи/.test(n)},k:.07,label:function(){return "Совет"}},
