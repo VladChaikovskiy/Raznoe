@@ -115,6 +115,10 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .hist button{display:flex;justify-content:space-between;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 0;text-align:left;font-size:14px}
 .hist button span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
 .store{font-size:13px;color:var(--muted)}
+.feel{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.feel span{margin-right:2px}
+.feel button{height:34px;padding:0 11px;border-radius:17px;border:1.5px solid var(--line);background:transparent;font-weight:600;font-size:13px}
+.feel button.on{background:var(--ink);border-color:var(--ink);color:var(--card)}
 /* rest timer */
 .rt{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .rtb{height:40px;padding:0 14px;border-radius:20px;border:1.5px solid var(--line);background:var(--bg);font-weight:700;font-size:14px;display:inline-flex;gap:7px;align-items:center}
@@ -201,35 +205,67 @@ function num(v){v=String(v).replace(",",".").trim();if(v==="")return null;var n=
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function today(){return new Date().toISOString().slice(0,10)}
 function dstr(iso){if(!iso)return"";var p=iso.slice(0,10).split("-");return p[2]+"."+p[1]+"."+p[0]}
-function ex(name,note,sets,reps,rest,type){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:null,type:type||"normal"}}
+function ex(name,note,sets,reps,rest,type,weight,step){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:weight==null?null:weight,step:step==null?2.5:step,type:type||"normal"}}
 
 function defaults(){
-  return {v:1,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+  return {v:2,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
     days:{
-      tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue"),
-        ex("Жим на скамье 40°","",3,"8–10","2 мин"),
-        ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин"),
-        ex("Разгибание на трицепс","",3,"10–12","1,5 мин"),
-        ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин"),
-        ex("Подъёмы на икры","гантели в руках",4,"10–15","1 мин"),
-        ex("Пресс: планка + «мёртвый жук»","жук: 3 × 10 на сторону",3,"30–45 с","1 мин")],
-      thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu"),
-        ex("Жим на скамье 40°","легче, чем во вторник, или разводка",3,"10–12","1,5 мин"),
-        ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин"),
-        ex("Тяга гантелей лёжа на наклонной 30–45°","начните с 16–20 кг",3,"10–12","1,5 мин"),
-        ex("Разводка на плечи","",3,"12–15","1 мин"),
-        ex("Разгибание на трицепс","",3,"12–15","1 мин"),
-        ex("Подъём гантелей с супинацией","",3,"10–12","1 мин"),
-        ex("Подъёмы на икры","гантели в руках",4,"12–20","1 мин"),
-        ex("Пресс: боковая планка + «птица-собака»","птица-собака: 3 × 8 на сторону",3,"20–30 с","1 мин")]
+      tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue",null,0),
+        ex("Жим на скамье 40°","штанга; гантелями — ~30 кг в руке",3,"8–10","2 мин",null,65,2.5),
+        ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин",null,65,2.5),
+        ex("Разгибание на трицепс","канат или прямая рукоять",3,"10–12","1,5 мин",null,30,2.5),
+        ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин",null,35,2.5),
+        ex("Подъёмы на икры","гантели в руках, вес одной",4,"10–15","1 мин",null,24,2),
+        ex("Пресс: планка + «мёртвый жук»","жук: 10 на сторону",4,"30–45 с","1 мин",null,null,0)],
+      thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu",null,0),
+        ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,32,2),
+        ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин",null,60,2.5),
+        ex("Тяга гантелей лёжа на наклонной 30–45°","вес одной гантели",3,"10–12","1,5 мин",null,18,2),
+        ex("Разводка на плечи","вес одной гантели, без рывков",3,"12–15","1 мин",null,8,1),
+        ex("Разгибание на трицепс","канат или прямая рукоять",3,"12–15","1 мин",null,25,2.5),
+        ex("Подъём гантелей с супинацией","вес одной гантели",3,"10–12","1 мин",null,14,2),
+        ex("Подъёмы на икры","гантели в руках, вес одной",4,"12–20","1 мин",null,20,2),
+        ex("Пресс: боковая планка + «птица-собака»","птица-собака: 8 на сторону",4,"20–30 с","1 мин",null,null,0)]
     }};
 }
 
 var cfg=defaults(), sessions={};
+
+/* Program update v2: start weights, progression step, 4 abs sets,
+   flat dumbbell press on Thursday instead of the second incline press.
+   Only touches exercises that still look like the original ones. */
+var START={"жим на скамье 40°":[65,2.5],"тяга верхнего блока|широкий хват":[65,2.5],"тяга верхнего блока|узкий хват":[60,2.5],
+  "разгибание на трицепс|tue":[30,2.5],"разгибание на трицепс|thu":[25,2.5],"подъём штанги на бицепс":[35,2.5],
+  "подъёмы на икры|tue":[24,2],"подъёмы на икры|thu":[20,2],"тяга гантелей лёжа на наклонной 30–45°":[18,2],
+  "разводка на плечи":[8,1],"подъём гантелей с супинацией":[14,2],"жим гантелей лёжа":[32,2]};
+function migrate(c){
+  if(!c||!c.days)return c;
+  if((c.v||1)<2){
+    ["tue","thu"].forEach(function(d){
+      var list=c.days[d]||[];
+      list.forEach(function(e){
+        var n=String(e.name).toLowerCase();
+        if(e.type==="benchTue"||e.type==="benchThu"){if(e.step==null)e.step=0;return}
+        if(/^пресс/.test(n)){if((parseInt(e.sets,10)||0)<4)e.sets=4;e.step=0;return}
+        var k=START[n+"|"+(e.note||"")]||START[n+"|"+d]||START[n];
+        if(k){if(e.weight==null)e.weight=k[0];if(e.step==null)e.step=k[1]}
+        if(e.step==null)e.step=/гантел/.test(n)?2:2.5;
+        if(e.note==="начните с 16–20 кг")e.note="вес одной гантели";
+      });
+      if(d==="thu"&&!list.some(function(e){return /жим гантелей лёжа/i.test(e.name)})){
+        var at=-1;list.forEach(function(e,i){if(at<0&&e.name==="Жим на скамье 40°"&&/легче/.test(e.note||""))at=i});
+        var ne=ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,32,2);
+        if(at>=0)list.splice(at,1,ne);else{var bi=list.findIndex(function(e){return e.type==="benchThu"});list.splice(bi+1,0,ne)}
+      }
+    });
+    c.v=2;c.updatedAt=Date.now();
+  }
+  return c;
+}
 var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
 var mode="local", col=null, timers={}, chains={};
 
-try{var cached=JSON.parse(localStorage.getItem(LS)||"null");if(cached&&cached.cfg){cfg=cached.cfg;sessions=cached.sessions||{}}}catch(e){}
+try{var cached=JSON.parse(localStorage.getItem(LS)||"null");if(cached&&cached.cfg){cfg=migrate(cached.cfg);sessions=cached.sessions||{}}}catch(e){}
 
 /* ---------- storage ---------- */
 function cacheLocal(){try{localStorage.setItem(LS,JSON.stringify({cfg:cfg,sessions:sessions}))}catch(e){}}
@@ -262,7 +298,7 @@ function connect(){
     var remoteCfg=null,remoteS={};
     res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
     if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
-      cfg=remoteCfg;
+      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<2)persist("config",cfg);
       Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
       cacheLocal();
     }else{
@@ -348,10 +384,14 @@ function viewCard(e,i,s,base){
     }
     o+='<div class="warm">Подводящие: '+warm.join(' · ')+'</div>';
   }else{
-    var l=exLog(s,e.id),wv=(l&&l.w!=null)?l.w:e.weight;
+    var l=exLog(s,e.id),pl=plan(e),wv=dispW(e,l,pl);
+    if(!hasW(e)){o+='<div class="exb"><span class="tag">без веса</span><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>'}else{
     o+='<div class="exb"><div class="wt"><button class="step" data-act="wminus" data-id="'+e.id+'" aria-label="Меньше вес">−</button><input class="win" data-in="w" data-id="'+e.id+'" inputmode="decimal" placeholder="—" value="'+fmt(wv)+'" aria-label="Рабочий вес, кг"><span>кг</span><button class="step" data-act="wplus" data-id="'+e.id+'" aria-label="Больше вес">+</button></div><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>';
-    var sg=dbSuggest(e,base);
-    if(sg)o+='<div class="sug"><span>'+sg.label+': <b>~'+fmt(sg.kg)+' кг</b> в каждой руке</span>'+(wv===sg.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+sg.kg+'">Поставить</button>')+'</div>';
+    if(pl){o+='<div class="sug"><span>'+pl.why+': <b>'+fmt(pl.kg)+' кг</b></span>'+(wv===pl.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+pl.kg+'">Поставить</button>')+'</div>'}
+    else{var sg=dbSuggest(e,base);
+    if(sg&&e.weight==null)o+='<div class="sug"><span>'+sg.label+': <b>~'+fmt(sg.kg)+' кг</b> в каждой руке</span>'+(wv===sg.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+sg.kg+'">Поставить</button>')+'</div>'}
+    }
+    if(exDone(s,e)){var fv=l&&l.f;o+='<div class="feel"><span>Как прошло?</span>'+[["e","Легко"],["n","Нормально"],["h","Тяжело"]].map(function(x){return '<button class="'+(fv===x[0]?'on':'')+'" data-act="feel" data-id="'+e.id+'" data-f="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'}
   }
   return o+chips(s,e)+'<div class="rt" id="rt-'+e.id+'">'+rtInner(e)+'</div></article>';
 }
@@ -366,9 +406,11 @@ function editCard(e,i,n){
     o+='<label>Подходы<input data-in="sets" data-id="'+e.id+'" inputmode="numeric" value="'+esc(e.sets)+'"></label>';
     o+='<label>Повторы<input data-in="reps" data-id="'+e.id+'" value="'+esc(e.reps)+'"></label>';
   }
+  if(!isBench(e))o+='<label>Шаг, кг<input data-in="step" data-id="'+e.id+'" inputmode="decimal" value="'+fmt(e.step==null?2.5:e.step)+'"></label>';
   o+='<label'+(isBench(e)?' class="w2"':'')+'>Отдых<input data-in="rest" data-id="'+e.id+'" value="'+esc(e.rest)+'"></label>';
   o+='</div>';
   if(isBench(e))o+='<p class="hint">Подходы и веса жима считаются по волне от максимума цикла.</p>';
+  else o+='<p class="hint">Шаг — на сколько прибавлять вес. 0 — упражнение без веса.</p>';
   o+='<div class="edbar"><button class="mini" data-act="up" data-id="'+e.id+'"'+(i===0?' disabled':'')+' aria-label="Выше">↑</button><button class="mini" data-act="down" data-id="'+e.id+'"'+(i===n-1?' disabled':'')+' aria-label="Ниже">↓</button>';
   o+='<button class="mini danger'+(ui.delArm===e.id?' armed':'')+'" data-act="del" data-id="'+e.id+'">'+(ui.delArm===e.id?'Точно удалить?':'Удалить')+'</button></div>';
   return o+'</article>';
@@ -393,6 +435,36 @@ function settingsHTML(){
   o+='<div class="box"><h3>Данные</h3><p class="store">'+(mode==="db"?'Сохраняются в вашем аккаунте Claude: видны только вам, на любом устройстве.':'Сохраняются только на этом устройстве.')+'</p>';
   o+='<button class="mini danger'+(ui.resetArm?' armed':'')+'" data-act="reset" style="align-self:flex-start">'+(ui.resetArm?'Точно стереть всё?':'Сбросить всё к началу')+'</button></div>';
   return o+'</div></section>';
+}
+
+/* ---------- weight progression ---------- */
+function hasW(e){return !isBench(e)&&(e.step==null||e.step>0)}
+function dispW(e,l,pl){if(l&&l.w!=null)return l.w;if(pl)return pl.kg;return e.weight}
+function roundStep(v,st){return Math.max(st,Math.round(v/st)*st)}
+// Double progression from the history before the current session:
+// all sets done + "легко" -> +step; two sessions in a row all done at the same weight (not "тяжело") -> +step;
+// not all sets done twice in a row at the same weight -> -10%.
+function plan(e){
+  if(!hasW(e))return null;
+  var st=e.step||2.5,c=cfg.cur,cur=[c.c,c.w,DORD[c.d]],hist=[];
+  orderedSessions().forEach(function(s){
+    var pos=[s.c,s.w,DORD[s.d]];if(pos[0]>cur[0]||(pos[0]===cur[0]&&(pos[1]>cur[1]||(pos[1]===cur[1]&&pos[2]>=cur[2]))))return;
+    if(s.w===5)return; // deload week does not count
+    var l=s.ex&&s.ex[e.id];if(!l||l.w==null)return;var n=Math.max(1,parseInt(e.sets,10)||1),dn=doneSets(l,n);if(!dn)return;
+    hist.push({w:l.w,all:dn>=n,f:l.f||null});
+  });
+  if(!hist.length){if(c.w===5&&e.weight)return {kg:roundStep(e.weight*.7,st),why:"Разгрузка — на 30% легче"};return null}
+  var L=hist[hist.length-1];
+  if(c.w===5)return {kg:roundStep(L.w*.7,st),why:"Разгрузка — на 30% легче"};
+  var P=hist.length>1?hist[hist.length-2]:null;
+  if(!L.all){
+    if(P&&!P.all&&P.w===L.w)return {kg:roundStep(L.w*.9,st),why:"Два раза не вышло — снизить"};
+    return {kg:L.w,why:"Прошлый раз не все подходы — повторить"};
+  }
+  if(L.f==="h")return {kg:L.w,why:"Было тяжело — повторить"};
+  if(L.f==="e")return {kg:roundStep(L.w+st,st),why:"Было легко — прибавить"};
+  if(P&&P.all&&P.w===L.w&&P.f!=="h")return {kg:roundStep(L.w+st,st),why:"Два раза всё сделано — прибавить"};
+  return {kg:L.w,why:"План: закрепить вес"};
 }
 
 /* ---------- dumbbell suggestions ---------- */
@@ -537,7 +609,7 @@ document.addEventListener("click",function(ev){
     case "import":
       var d=null;try{d=JSON.parse(document.getElementById("bkIn").value)}catch(e){}
       if(!d||!d.cfg||!d.cfg.days||!d.cfg.cycles){toast("Это не похоже на данные приложения");return}
-      cfg=d.cfg;sessions=d.sessions||{};saveCfg();Object.keys(sessions).forEach(saveSess);ui.backup=null;ui.settings=false;toast("Данные загружены");break;
+      cfg=migrate(d.cfg);sessions=d.sessions||{};saveCfg();Object.keys(sessions).forEach(saveSess);ui.backup=null;ui.settings=false;toast("Данные загружены");break;
     case "cprev":return go(c.c-1,1,"tue");
     case "cnext":return go(c.c+1,1,"tue");
     case "week":ui.stats=false;return go(c.c,+b.dataset.w,c.d);
@@ -545,11 +617,12 @@ document.addEventListener("click",function(ev){
     case "goto":ui.settings=false;return go(+b.dataset.c,+b.dataset.w,b.dataset.d);
     case "set":
       f=findEx(id);if(!f)return;l=logFor(id,true);l.s=l.s||[];var i=+b.dataset.i;l.s[i]=!l.s[i];
-      if(!isBench(f.e)&&l.w==null&&f.e.weight!=null)l.w=f.e.weight;
+      if(!isBench(f.e)&&l.w==null&&hasW(f.e)){var dw=dispW(f.e,null,plan(f.e));if(dw!=null){l.w=dw;f.e.weight=dw;saveCfg()}}
       saveSess(curKey());
       if(l.s[i]&&!exDone(sess(curKey()),f.e))startRest(f.e);
       break;
     case "rest":f=findEx(id);if(f)startRest(f.e);break;
+    case "feel":l=logFor(id,true);l.f=(l.f===b.dataset.f)?null:b.dataset.f;saveSess(curKey());break;
     case "rplus":if(timer){timer.end+=30000;timer.total+=30;saveTimer()}refreshTimer(true);return;
     case "rstop":timer=null;saveTimer();refreshTimer(true);return;
     case "pill":
@@ -557,7 +630,7 @@ document.addEventListener("click",function(ev){
       if(timer.d!==cfg.cur.d||ui.stats){ui.stats=false;cfg.cur.d=timer.d;render()}
       var el=document.getElementById("rt-"+timer.id);if(el)el.scrollIntoView({block:"center",behavior:"smooth"});return;
     case "wplus":case "wminus":
-      f=findEx(id);if(!f)return;l=logFor(id,true);var v=(l.w!=null?l.w:f.e.weight)||0;v=Math.max(0,v+(a==="wplus"?2.5:-2.5));l.w=v;f.e.weight=v;saveSess(curKey());saveCfg();break;
+      f=findEx(id);if(!f)return;l=logFor(id,true);var v=(l.w!=null?l.w:dispW(f.e,null,plan(f.e)))||0,stp=f.e.step||2.5;v=Math.max(0,Math.round((v+(a==="wplus"?stp:-stp))*100)/100);l.w=v;f.e.weight=v;saveSess(curKey());saveCfg();break;
     case "finish":var s=sess(curKey(),true);s.doneAt=today();saveSess(curKey());toast(DAYN[c.d]+", неделя "+c.w+": выполнено");break;
     case "undone":sessions[curKey()].doneAt=null;saveSess(curKey());break;
     case "next":
@@ -593,7 +666,7 @@ document.addEventListener("input",function(ev){
   if(k==="tw"||k==="tr"){var s=sess(curKey(),true);s.test=s.test||{};s.test[k==="tw"?"w":"r"]=num(t.value);saveSess(curKey());var e=document.getElementById("est");if(e)e.textContent=estText(s.test);return}
   if(k==="base"){var b=num(t.value);if(b&&b>=20){cyc(cfg.cur.c).base=b;saveCfg()}return}
   f=findEx(id);if(!f)return;
-  if(k==="sets"){var n=parseInt(t.value,10);if(n>=1&&n<=12)f.e.sets=n}else f.e[k]=t.value;
+  if(k==="sets"){var n=parseInt(t.value,10);if(n>=1&&n<=12)f.e.sets=n}else if(k==="step"){var st=num(t.value);if(st!=null&&st>=0&&st<=20)f.e.step=st}else f.e[k]=t.value;
   saveCfg();
 });
 document.addEventListener("change",function(ev){if(ev.target.dataset&&ev.target.dataset.in==="base")render()});
