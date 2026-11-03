@@ -125,6 +125,11 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .feel span{margin-right:2px}
 .feel button{height:34px;padding:0 11px;border-radius:17px;border:1.5px solid var(--line);background:transparent;font-weight:600;font-size:13px}
 .feel button.on{background:var(--ink);border-color:var(--ink);color:var(--card)}
+.feel button.on.f-e{background:var(--ok);border-color:var(--ok);color:#fff}
+.feel button.on.f-n{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip.on.r-e{background:var(--ok);border-color:var(--ok);color:#fff}
+.chip.on.r-h{background:var(--hdr);border-color:var(--hdr);color:var(--hdr-fg)}
+.chip.on.r-h::after{content:"!";margin-left:1px}
 /* rest timer */
 .rt{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .rtb{height:40px;padding:0 14px;border-radius:20px;border:1.5px solid var(--line);background:var(--bg);font-weight:700;font-size:14px;display:inline-flex;gap:7px;align-items:center}
@@ -215,27 +220,28 @@ function ex(name,note,sets,reps,rest,type,weight,step){return {id:uid(),name:nam
 
 function ssx(e){e.ss=true;return e}
 function defaults(){
-  return {v:5,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+  return {v:6,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
     days:{
       tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue",null,0),
         ex("Жим гантелей на скамье 30°","вес одной гантели",3,"8–10","2 мин",null,28,2),
-        ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин",null,65,2.5),
+        ex("Тяга верхнего блока","средний хват: ширина плеч + ладонь",4,"8–10","2 мин",null,65,2.5),
         ex("Тяга гантели одной рукой с упором в скамью","рука и колено на скамье, спина ровная; вес одной",3,"10–12","1,5 мин",null,30,2),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"10–12","1,5 мин",null,30,2.5),
         ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин",null,35,2.5),
         ex("Выпады назад с гантелями","вес одной гантели; на каждую ногу, корпус прямой",3,"8–10","1,5 мин",null,14,2),
+        ex("Сгибание ног с гантелью лёжа","гантель зажата стопами, таз прижат к скамье",3,"10–12","1 мин",null,10,2),
         ssx(ex("Пресс: планка + «мёртвый жук»","жук: 10 на сторону",4,"30–45 с","сразу икры",null,null,0)),
-        ex("Подъёмы на икры","гантели в руках, вес одной",3,"12–15","1 мин",null,24,2)],
+        ex("Подъёмы на икры","гантели в руках, вес одной",4,"12–15","1 мин",null,24,2)],
       thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu",null,0),
         ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,30,2),
-        ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин",null,60,2.5),
+        ex("Тяга верхнего блока","нейтральный хват: V-рукоять, ладони друг к другу",4,"10–12","1,5 мин",null,60,2.5),
         ex("Тяга каната к лицу на верхнем блоке","face pull: локти высоко, разводите канат к ушам",3,"12–15","1 мин",null,20,2.5),
-        ex("Разводка на плечи","вес одной гантели, без рывков",3,"12–15","1 мин",null,8,1),
+        ex("Разводка на плечи","вес одной гантели, без рывков",4,"12–15","1 мин",null,8,1),
         ex("Разгибание из-за головы на верхнем блоке","канат, спиной к блоку, шаг вперёд, живот напряжён",3,"10–12","1 мин",null,20,2.5),
         ex("Подъём гантелей с супинацией","вес одной гантели",3,"10–12","1 мин",null,14,2),
         ex("Разгибание ног","вниз медленно, наверху без удара в замок",3,"12–15","1 мин",null,45,2.5),
         ssx(ex("Пресс: боковая планка + «птица-собака»","птица-собака: 8 на сторону",4,"20–30 с","сразу икры",null,null,0)),
-        ex("Подъёмы на икры","гантели в руках, вес одной",3,"12–15","1 мин",null,20,2)]
+        ex("Подъёмы на икры","гантели в руках, вес одной",4,"12–15","1 мин",null,20,2)]
     }};
 }
 
@@ -326,9 +332,26 @@ function migrate(c){
     });
     c.v=5;c.updatedAt=Date.now();
   }
+  if(c.v<6){
+    // v6: dumbbell leg curl on Tuesday, medium / neutral grip pulldowns, laterals and calves 4 sets
+    ["tue","thu"].forEach(function(d){
+      var L=c.days[d]||[];
+      L.forEach(function(e){
+        if(e.name==="Тяга верхнего блока"&&e.note==="широкий хват")e.note="средний хват: ширина плеч + ладонь";
+        if(e.name==="Тяга верхнего блока"&&e.note==="узкий хват")e.note="нейтральный хват: V-рукоять, ладони друг к другу";
+        if((/^разводка на плечи/i.test(e.name)||/^подъёмы на икры/i.test(e.name))&&(parseInt(e.sets,10)||0)<4)e.sets=4;
+      });
+      if(d==="tue"&&!L.some(function(e){return /сгибание ног/i.test(e.name)})){
+        var at=-1;L.forEach(function(e,i){if(/выпад/i.test(e.name))at=i});
+        if(at<0)L.forEach(function(e,i){if(at<0&&e.ss)at=i-1});
+        L.splice(at>=0?at+1:L.length,0,ex("Сгибание ног с гантелью лёжа","гантель зажата стопами, таз прижат к скамье",3,"10–12","1 мин",null,10,2));
+      }
+    });
+    c.v=6;c.updatedAt=Date.now();
+  }
   return c;
 }
-var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
+var ui={rate:null,edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
 var mode="local", col=null, timers={}, chains={};
 
 try{var cached=JSON.parse(localStorage.getItem(LS)||"null");if(cached&&cached.cfg){cfg=migrate(cached.cfg);sessions=cached.sessions||{}}}catch(e){}
@@ -364,7 +387,7 @@ function connect(){
     var remoteCfg=null,remoteS={};
     res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
     if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
-      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<5)persist("config",cfg);
+      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<6)persist("config",cfg);
       Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
       cacheLocal();
     }else{
@@ -431,7 +454,11 @@ function render(){
 
 function nextLabel(){var c=cfg.cur;if(c.d==="tue")return "Четверг";if(c.w<6)return "Неделя "+(c.w+1);return "Новый цикл"}
 
-function chips(s,e){var n=setCount(e),l=exLog(s,e.id),o='<div class="sets">';for(var i=0;i<n;i++){var on=l&&l.s&&l.s[i];o+='<button class="chip'+(on?' on':'')+'" data-act="set" data-id="'+e.id+'" data-i="'+i+'" aria-pressed="'+(on?'true':'false')+'">'+(n===1&&isBench(e)&&scheme(e).test?'Сделано':(i+1))+'</button>'}return o+'</div>'}
+function chips(s,e){var n=setCount(e),l=exLog(s,e.id),o='<div class="sets">';for(var i=0;i<n;i++){var on=l&&l.s&&l.s[i],rt=on?((l.r&&l.r[i])||"n"):"";o+='<button class="chip'+(on?' on r-'+rt:'')+'" title="'+(on?RLAB[rt]:'')+'" data-act="set" data-id="'+e.id+'" data-i="'+i+'" aria-pressed="'+(on?'true':'false')+'">'+(n===1&&isBench(e)&&scheme(e).test?'Сделано':(i+1))+'</button>'}o+='</div>';
+  if(ui.rate&&ui.rate.id===e.id&&l&&l.s&&l.s[ui.rate.i]){var cr=(l.r&&l.r[ui.rate.i])||"n";
+    o+='<div class="feel"><span>Подход '+(ui.rate.i+1)+':</span>'+[["e","Легко"],["n","Нормально"],["h","Тяжело"]].map(function(x){return '<button class="'+(cr===x[0]?'on f-'+x[0]:'')+'" data-act="rate" data-id="'+e.id+'" data-i="'+ui.rate.i+'" data-f="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'}
+  return o}
+var RLAB={e:"легко",n:"нормально",h:"тяжело"};
 
 function head(e,i){return '<div class="exh"><span class="num">'+(i+1)+'</span><div class="t"><h3>'+esc(e.name)+'</h3>'+(e.ss||isSSnext(e)?'<p class="ssp">Суперсет</p>':'')+(e.note?'<p>'+esc(e.note)+'</p>':'')+'</div><span class="rest">'+esc(e.rest)+'</span></div>'}
 
@@ -457,7 +484,6 @@ function viewCard(e,i,s,base){
     else{var sg=dbSuggest(e,base);
     if(sg&&e.weight==null)o+='<div class="sug"><span>'+sg.label+': <b>~'+fmt(sg.kg)+' кг</b> в каждой руке</span>'+(wv===sg.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+sg.kg+'">Поставить</button>')+'</div>'}
     }
-    if(exDone(s,e)){var fv=l&&l.f;o+='<div class="feel"><span>Как прошло?</span>'+[["e","Легко"],["n","Нормально"],["h","Тяжело"]].map(function(x){return '<button class="'+(fv===x[0]?'on':'')+'" data-act="feel" data-id="'+e.id+'" data-f="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'}
   }
   return o+chips(s,e)+'<div class="rt" id="rt-'+e.id+'">'+rtInner(e)+'</div></article>';
 }
@@ -486,10 +512,11 @@ function editCard(e,i,n){
 function settingsHTML(){
   var c=cfg.cur,cur=cyc(c.c),last=cfg.cycles[cfg.cycles.length-1];
   var lt=sessions[key(last.n,6,"tue")],est=lt&&lt.test&&lt.test.w&&lt.test.r?r25(lt.test.w*(1+lt.test.r/30)):null;
+  var bf=benchFeel(last.n),inc=bf==="easy"?5:bf==="hard"?0:2.5;
   var o='<section class="sheet pad"><div class="app"><div class="shd"><h2>Настройки</h2><button class="primary" data-act="close">Закрыть</button></div>';
   o+='<div class="box"><h3>Максимум цикла '+cur.n+'</h3><div class="fld"><input id="baseIn" data-in="base" inputmode="decimal" value="'+fmt(cur.base)+'" aria-label="Максимум, кг"><span>кг · от него считаются веса жима</span></div></div>';
-  o+='<div class="box'+(ui.hlCycle?' hl':'')+'"><h3>Новый цикл '+(last.n+1)+'</h3><p class="hint">Начинайте после 6-й недели. Обычно максимум +2,5 кг к прошлому циклу'+(est?'. По вашей проверке: ≈ '+fmt(est)+' кг':'')+'.</p>';
-  o+='<div class="fld"><input id="newBase" inputmode="decimal" value="'+fmt(r25(last.base+2.5))+'" aria-label="Максимум нового цикла, кг"><span>кг</span><button class="primary" data-act="newcycle">Начать цикл '+(last.n+1)+'</button></div></div>';
+  o+='<div class="box'+(ui.hlCycle?' hl':'')+'"><h3>Новый цикл '+(last.n+1)+'</h3><p class="hint">Начинайте после 6-й недели. Обычно максимум +2,5 кг к прошлому циклу'+(est?'. По вашей проверке: ≈ '+fmt(est)+' кг':'')+'.'+(bf==="easy"?' На неделях 3–4 жим шёл легко — предлагаю +5 кг.':bf==="hard"?' На неделях 3–4 жим шёл тяжело — лучше повторить цикл с тем же максимумом.':'')+'</p>';
+  o+='<div class="fld"><input id="newBase" inputmode="decimal" value="'+fmt(r25(last.base+inc))+'" aria-label="Максимум нового цикла, кг"><span>кг</span><button class="primary" data-act="newcycle">Начать цикл '+(last.n+1)+'</button></div></div>';
   var hist=Object.keys(sessions).map(function(k){return sessions[k]}).filter(function(x){return x.doneAt}).sort(function(a,b){return a.doneAt<b.doneAt?1:-1});
   o+='<div class="box"><h3>История</h3>';
   if(!hist.length)o+='<p class="hint">Здесь появятся тренировки, отмеченные как выполненные.</p>';
@@ -505,6 +532,14 @@ function settingsHTML(){
 }
 
 /* ---------- weight progression ---------- */
+// Bench sets of weeks 3-4 (both days) in a cycle: mostly easy / any repeated hard.
+function benchFeel(cn){
+  var ez=0,hd=0,tot=0;
+  [3,4].forEach(function(w){["tue","thu"].forEach(function(d){var s=sessions[key(cn,w,d)];if(!s||!s.ex)return;
+    cfg.days[d].forEach(function(e){if(!isBench(e))return;var l=s.ex[e.id];if(!l||!l.s)return;
+      l.s.forEach(function(on,q){if(!on)return;tot++;var r=(l.r&&l.r[q])||"n";if(r==="e")ez++;if(r==="h")hd++})})})});
+  if(!tot)return null;if(hd>=2)return "hard";if(ez>=tot*.75)return "easy";return "ok";
+}
 function hasW(e){return !isBench(e)&&(e.step==null||e.step>0)}
 function dispW(e,l,pl){if(l&&l.w!=null)return l.w;if(pl)return pl.kg;return e.weight}
 function roundStep(v,st){return Math.max(st,Math.round(v/st)*st)}
@@ -518,20 +553,23 @@ function plan(e){
     var pos=[s.c,s.w,DORD[s.d]];if(pos[0]>cur[0]||(pos[0]===cur[0]&&(pos[1]>cur[1]||(pos[1]===cur[1]&&pos[2]>=cur[2]))))return;
     if(s.w===5)return; // deload week does not count
     var l=s.ex&&s.ex[e.id];if(!l||l.w==null)return;var n=Math.max(1,parseInt(e.sets,10)||1),dn=doneSets(l,n);if(!dn)return;
-    hist.push({w:l.w,all:dn>=n,f:l.f||null});
+    var ez=0,hd=0;for(var q=0;q<n;q++){if(!(l.s&&l.s[q]))continue;var rr=(l.r&&l.r[q])||(l.f==="e"?"e":l.f==="h"?"h":"n");if(rr==="e")ez++;else if(rr==="h")hd++}
+    hist.push({w:l.w,all:dn>=n,n:n,ez:ez,hd:hd});
   });
   if(!hist.length){if(c.w===5&&e.weight)return {kg:roundStep(e.weight*.7,st),why:"Разгрузка — на 30% легче"};return null}
   var L=hist[hist.length-1];
   if(c.w===5)return {kg:roundStep(L.w*.7,st),why:"Разгрузка — на 30% легче"};
   var P=hist.length>1?hist[hist.length-2]:null;
-  if(!L.all){
-    if(P&&!P.all&&P.w===L.w)return {kg:roundStep(L.w*.9,st),why:"Два раза не вышло — снизить"};
-    return {kg:L.w,why:"Прошлый раз не все подходы — повторить"};
+  var bad=function(x){return !x.all||x.hd>=2};
+  if(bad(L)){
+    if(P&&bad(P)&&P.w===L.w)return {kg:roundStep(L.w*.9,st),why:"Два раза подряд тяжело — снизить на 10%"};
+    return {kg:L.w,why:L.all?"Было тяжело — повторить вес":"Не все подходы — повторить вес"};
   }
-  if(L.f==="h")return {kg:L.w,why:"Было тяжело — повторить"};
-  if(L.f==="e")return {kg:roundStep(L.w+st,st),why:"Было легко — прибавить"};
-  if(P&&P.all&&P.w===L.w&&P.f!=="h")return {kg:roundStep(L.w+st,st),why:"Два раза всё сделано — прибавить"};
-  return {kg:L.w,why:"План: закрепить вес"};
+  if(L.hd===1)return {kg:L.w,why:"Один подход тяжело — повторить вес"};
+  if(L.ez===L.n)return {kg:roundStep(L.w+st,st),why:"Все подходы легко — прибавить"};
+  if(L.ez*2>=L.n)return {kg:roundStep(L.w+st,st),why:"Больше половины легко — прибавить"};
+  if(P&&P.all&&P.hd===0&&P.w===L.w)return {kg:roundStep(L.w+st,st),why:"Два раза всё нормально — прибавить"};
+  return {kg:L.w,why:"Всё нормально — закрепить вес"};
 }
 
 /* ---------- dumbbell suggestions ---------- */
@@ -689,8 +727,11 @@ document.addEventListener("click",function(ev){
       f=findEx(id);if(!f)return;l=logFor(id,true);l.s=l.s||[];var i=+b.dataset.i;l.s[i]=!l.s[i];
       if(!isBench(f.e)&&l.w==null&&hasW(f.e)){var dw=dispW(f.e,null,plan(f.e));if(dw!=null){l.w=dw;f.e.weight=dw;saveCfg()}}
       saveSess(curKey());
+      l.r=l.r||[];if(l.s[i]){l.r[i]=l.r[i]||"n";ui.rate={id:id,i:i}}else{l.r[i]=null;if(ui.rate&&ui.rate.id===id)ui.rate=null}
+      saveSess(curKey());
       if(l.s[i]&&!exDone(sess(curKey()),f.e))startRest(f.e);
       break;
+    case "rate":l=logFor(id,true);l.r=l.r||[];l.r[+b.dataset.i]=b.dataset.f;ui.rate=null;saveSess(curKey());break;
     case "rest":f=findEx(id);if(f)startRest(f.e);break;
     case "feel":l=logFor(id,true);l.f=(l.f===b.dataset.f)?null:b.dataset.f;saveSess(curKey());break;
     case "rplus":if(timer){timer.end+=30000;timer.total+=30;saveTimer()}refreshTimer(true);return;
