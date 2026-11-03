@@ -115,6 +115,12 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 .hist button{display:flex;justify-content:space-between;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 0;text-align:left;font-size:14px}
 .hist button span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
 .store{font-size:13px;color:var(--muted)}
+.sschk{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)}
+.sschk input{width:20px;height:20px;accent-color:var(--accent)}
+.unit{display:flex;flex-direction:column;line-height:1.05}
+.unit small{font-family:var(--body);font-weight:600;font-size:10px;letter-spacing:.2px;text-transform:none;white-space:nowrap}
+.sstag{font-size:13px;font-weight:600;color:var(--accent)}
+.t p.ssp{color:var(--accent);font-weight:700;font-size:11px;letter-spacing:1px;text-transform:uppercase}
 .feel{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .feel span{margin-right:2px}
 .feel button{height:34px;padding:0 11px;border-radius:17px;border:1.5px solid var(--line);background:transparent;font-weight:600;font-size:13px}
@@ -207,25 +213,29 @@ function today(){return new Date().toISOString().slice(0,10)}
 function dstr(iso){if(!iso)return"";var p=iso.slice(0,10).split("-");return p[2]+"."+p[1]+"."+p[0]}
 function ex(name,note,sets,reps,rest,type,weight,step){return {id:uid(),name:name,note:note||"",sets:sets,reps:reps,rest:rest,weight:weight==null?null:weight,step:step==null?2.5:step,type:type||"normal"}}
 
+function ssx(e){e.ss=true;return e}
 function defaults(){
-  return {v:4,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
+  return {v:5,updatedAt:0,cur:{c:1,w:1,d:"tue"},cycles:[{n:1,base:110,started:today()}],
     days:{
       tue:[ex("Жим лёжа","",0,"","3–4 мин","benchTue",null,0),
-        ex("Жим гантелей на скамье 40°","вес одной гантели",3,"8–10","2 мин",null,30,2),
+        ex("Жим гантелей на скамье 30°","вес одной гантели",3,"8–10","2 мин",null,28,2),
         ex("Тяга верхнего блока","широкий хват",4,"8–10","2 мин",null,65,2.5),
-        ex("Тяга гантели одной рукой с упором в скамью","рука и колено на скамье, спина ровная; вес одной",3,"10–12","1,5 мин",null,28,2),
+        ex("Тяга гантели одной рукой с упором в скамью","рука и колено на скамье, спина ровная; вес одной",3,"10–12","1,5 мин",null,30,2),
         ex("Разгибание на трицепс","канат или прямая рукоять",3,"10–12","1,5 мин",null,30,2.5),
         ex("Подъём штанги на бицепс","спиной к стене, без раскачки",3,"8–10","1,5 мин",null,35,2.5),
-        ex("Подъёмы на икры","гантели в руках, вес одной",4,"10–15","1 мин",null,24,2),
-        ex("Пресс: планка + «мёртвый жук»","жук: 10 на сторону",4,"30–45 с","1 мин",null,null,0)],
+        ex("Выпады назад с гантелями","вес одной гантели; на каждую ногу, корпус прямой",3,"8–10","1,5 мин",null,14,2),
+        ssx(ex("Пресс: планка + «мёртвый жук»","жук: 10 на сторону",4,"30–45 с","сразу икры",null,null,0)),
+        ex("Подъёмы на икры","гантели в руках, вес одной",3,"12–15","1 мин",null,24,2)],
       thu:[ex("Жим лёжа с паузой 1 сек","",0,"","2–3 мин","benchThu",null,0),
-        ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,32,2),
+        ex("Жим гантелей лёжа","вес одной гантели, локти 45–60°",3,"8–10","2 мин",null,30,2),
         ex("Тяга верхнего блока","узкий хват",4,"10–12","1,5 мин",null,60,2.5),
         ex("Тяга каната к лицу на верхнем блоке","face pull: локти высоко, разводите канат к ушам",3,"12–15","1 мин",null,20,2.5),
         ex("Разводка на плечи","вес одной гантели, без рывков",3,"12–15","1 мин",null,8,1),
-        ex("Разгибание на трицепс","канат или прямая рукоять",3,"12–15","1 мин",null,25,2.5),
+        ex("Разгибание из-за головы на верхнем блоке","канат, спиной к блоку, шаг вперёд, живот напряжён",3,"10–12","1 мин",null,20,2.5),
         ex("Подъём гантелей с супинацией","вес одной гантели",3,"10–12","1 мин",null,14,2),
-        ex("Пресс: боковая планка + «птица-собака»","птица-собака: 8 на сторону",4,"20–30 с","1 мин",null,null,0)]
+        ex("Разгибание ног","вниз медленно, наверху без удара в замок",3,"12–15","1 мин",null,45,2.5),
+        ssx(ex("Пресс: боковая планка + «птица-собака»","птица-собака: 8 на сторону",4,"20–30 с","сразу икры",null,null,0)),
+        ex("Подъёмы на икры","гантели в руках, вес одной",3,"12–15","1 мин",null,20,2)]
     }};
 }
 
@@ -290,6 +300,32 @@ function migrate(c){
     c.days.thu=h4;
     c.v=4;c.updatedAt=Date.now();
   }
+  if(c.v<5){
+    // v5: 30° press, lighter second press, lunges (Tue), overhead triceps + leg extension (Thu),
+    // abs + calves superset at the end of both days, calves 3 sets.
+    var isAbs=function(e){return /^пресс/i.test(e.name)},isCalf=function(e){return /^подъёмы на икры/i.test(e.name)};
+    ["tue","thu"].forEach(function(d){
+      var L=c.days[d]||[];
+      L.forEach(function(e){
+        if(/^жим гантелей на скамье 40°$/i.test(e.name)){e.name="Жим гантелей на скамье 30°";if(e.weight===30)e.weight=28}
+        if(e.name==="Жим гантелей лёжа"&&e.weight===32)e.weight=30;
+        if(/одной рукой/i.test(e.name)&&e.weight===28)e.weight=30;
+        if(isCalf(e)&&(parseInt(e.sets,10)||0)>3){e.sets=3;if(e.reps==="10–15")e.reps="12–15"}
+      });
+      if(d==="thu"){
+        L.forEach(function(e){if(e.name==="Разгибание на трицепс"){e.name="Разгибание из-за головы на верхнем блоке";e.note="канат, спиной к блоку, шаг вперёд, живот напряжён";e.reps="10–12";if(e.weight===25)e.weight=20}});
+        if(!L.some(function(e){return /^разгибание ног/i.test(e.name)}))L.push(ex("Разгибание ног","вниз медленно, наверху без удара в замок",3,"12–15","1 мин",null,45,2.5));
+        if(!L.some(isCalf))L.push(ex("Подъёмы на икры","гантели в руках, вес одной",3,"12–15","1 мин",null,20,2));
+      }else{
+        if(!L.some(function(e){return /выпад/i.test(e.name)}))L.push(ex("Выпады назад с гантелями","вес одной гантели; на каждую ногу, корпус прямой",3,"8–10","1,5 мин",null,14,2));
+      }
+      // order: everything else, then abs (superset) then calves
+      var abs=L.filter(isAbs),calf=L.filter(isCalf),rest=L.filter(function(e){return !isAbs(e)&&!isCalf(e)});
+      abs.forEach(function(e){e.ss=true;e.rest="сразу икры"});
+      c.days[d]=rest.concat(abs,calf);
+    });
+    c.v=5;c.updatedAt=Date.now();
+  }
   return c;
 }
 var ui={edit:false,settings:false,delArm:null,resetArm:false,hlCycle:false,backup:null,stats:false,selBar:null};
@@ -328,7 +364,7 @@ function connect(){
     var remoteCfg=null,remoteS={};
     res.snap.docs.forEach(function(d){var b=d.data();if(!b)return;if(d.id==="config")remoteCfg=JSON.parse(JSON.stringify(b));else if(d.id.indexOf("s_")===0)remoteS[d.id]=JSON.parse(JSON.stringify(b))});
     if(remoteCfg&&(remoteCfg.updatedAt||0)>=(cfg.updatedAt||0)){
-      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<4)persist("config",cfg);
+      var wasV=remoteCfg.v||1;cfg=migrate(remoteCfg);if(wasV<5)persist("config",cfg);
       Object.keys(remoteS).forEach(function(k){sessions[k]=remoteS[k]});
       cacheLocal();
     }else{
@@ -397,7 +433,7 @@ function nextLabel(){var c=cfg.cur;if(c.d==="tue")return "Четверг";if(c.w
 
 function chips(s,e){var n=setCount(e),l=exLog(s,e.id),o='<div class="sets">';for(var i=0;i<n;i++){var on=l&&l.s&&l.s[i];o+='<button class="chip'+(on?' on':'')+'" data-act="set" data-id="'+e.id+'" data-i="'+i+'" aria-pressed="'+(on?'true':'false')+'">'+(n===1&&isBench(e)&&scheme(e).test?'Сделано':(i+1))+'</button>'}return o+'</div>'}
 
-function head(e,i){return '<div class="exh"><span class="num">'+(i+1)+'</span><div class="t"><h3>'+esc(e.name)+'</h3>'+(e.note?'<p>'+esc(e.note)+'</p>':'')+'</div><span class="rest">'+esc(e.rest)+'</span></div>'}
+function head(e,i){return '<div class="exh"><span class="num">'+(i+1)+'</span><div class="t"><h3>'+esc(e.name)+'</h3>'+(e.ss||isSSnext(e)?'<p class="ssp">Суперсет</p>':'')+(e.note?'<p>'+esc(e.note)+'</p>':'')+'</div><span class="rest">'+esc(e.rest)+'</span></div>'}
 
 function viewCard(e,i,s,base){
   var done=exDone(s,e),o='<article class="ex'+(isBench(e)?' main':'')+(done?' done':'')+'">'+head(e,i);
@@ -416,7 +452,7 @@ function viewCard(e,i,s,base){
   }else{
     var l=exLog(s,e.id),pl=plan(e),wv=dispW(e,l,pl);
     if(!hasW(e)){o+='<div class="exb"><span class="tag">без веса</span><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>'}else{
-    o+='<div class="exb"><div class="wt"><button class="step" data-act="wminus" data-id="'+e.id+'" aria-label="Меньше вес">−</button><input class="win" data-in="w" data-id="'+e.id+'" inputmode="decimal" placeholder="—" value="'+fmt(wv)+'" aria-label="Рабочий вес, кг"><span>кг</span><button class="step" data-act="wplus" data-id="'+e.id+'" aria-label="Больше вес">+</button></div><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>';
+    o+='<div class="exb"><div class="wt"><button class="step" data-act="wminus" data-id="'+e.id+'" aria-label="Меньше вес">−</button><input class="win" data-in="w" data-id="'+e.id+'" inputmode="decimal" placeholder="—" value="'+fmt(wv)+'" aria-label="Рабочий вес, кг"><span class="unit">кг'+(/гантел/i.test(e.name)?'<small>1 гантель</small>':'')+'</span><button class="step" data-act="wplus" data-id="'+e.id+'" aria-label="Больше вес">+</button></div><div class="sr">'+esc(e.sets)+' × '+esc(e.reps)+'</div></div>';
     if(pl){o+='<div class="sug"><span>'+pl.why+': <b>'+fmt(pl.kg)+' кг</b></span>'+(wv===pl.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+pl.kg+'">Поставить</button>')+'</div>'}
     else{var sg=dbSuggest(e,base);
     if(sg&&e.weight==null)o+='<div class="sug"><span>'+sg.label+': <b>~'+fmt(sg.kg)+' кг</b> в каждой руке</span>'+(wv===sg.kg?'':'<button data-act="usesug" data-id="'+e.id+'" data-kg="'+sg.kg+'">Поставить</button>')+'</div>'}
@@ -441,6 +477,7 @@ function editCard(e,i,n){
   o+='</div>';
   if(isBench(e))o+='<p class="hint">Подходы и веса жима считаются по волне от максимума цикла.</p>';
   else o+='<p class="hint">Шаг — на сколько прибавлять вес. 0 — упражнение без веса.</p>';
+  if(!isBench(e))o+='<label class="sschk"><input type="checkbox" data-in="ss" data-id="'+e.id+'"'+(e.ss?' checked':'')+'> Суперсет со следующим упражнением</label>';
   o+='<div class="edbar"><button class="mini" data-act="up" data-id="'+e.id+'"'+(i===0?' disabled':'')+' aria-label="Выше">↑</button><button class="mini" data-act="down" data-id="'+e.id+'"'+(i===n-1?' disabled':'')+' aria-label="Ниже">↓</button>';
   o+='<button class="mini danger'+(ui.delArm===e.id?' armed':'')+'" data-act="del" data-id="'+e.id+'">'+(ui.delArm===e.id?'Точно удалить?':'Удалить')+'</button></div>';
   return o+'</article>';
@@ -617,6 +654,7 @@ function statsHTML(){
 }
 
 /* ---------- actions ---------- */
+function isSSnext(e){var l=cfg.days[cfg.cur.d];for(var i=1;i<l.length;i++)if(l[i]===e&&l[i-1].ss)return true;return false}
 function findEx(id){var l=cfg.days[cfg.cur.d];for(var i=0;i<l.length;i++)if(l[i].id===id)return {e:l[i],i:i,l:l};return null}
 function logFor(id,create){var s=sess(curKey(),create);if(!s)return null;s.ex=s.ex||{};if(!s.ex[id]&&create)s.ex[id]={s:[],w:null};return s.ex[id]}
 function go(c,w,d){cfg.cur={c:c,w:w,d:d};ui.delArm=null;saveCfg();render();window.scrollTo(0,0)}
@@ -698,6 +736,7 @@ document.addEventListener("input",function(ev){
   if(k==="tw"||k==="tr"){var s=sess(curKey(),true);s.test=s.test||{};s.test[k==="tw"?"w":"r"]=num(t.value);saveSess(curKey());var e=document.getElementById("est");if(e)e.textContent=estText(s.test);return}
   if(k==="base"){var b=num(t.value);if(b&&b>=20){cyc(cfg.cur.c).base=b;saveCfg()}return}
   f=findEx(id);if(!f)return;
+  if(k==="ss"){f=findEx(id);if(!f)return;f.e.ss=t.checked;saveCfg();return}
   if(k==="sets"){var n=parseInt(t.value,10);if(n>=1&&n<=12)f.e.sets=n}else if(k==="step"){var st=num(t.value);if(st!=null&&st>=0&&st<=20)f.e.step=st}else f.e[k]=t.value;
   saveCfg();
 });
@@ -718,6 +757,7 @@ function restSecs(e){
 function mmss(sec){sec=Math.max(0,Math.ceil(sec));return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")}
 var CLOCK='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/></svg>';
 function rtInner(e){
+  if(e.ss)return '<span class="sstag">Суперсет ↓ без отдыха — сразу к следующему упражнению</span>';
   if(timer&&timer.id===e.id){
     var rem=(timer.end-Date.now())/1000;
     if(rem>0)return '<span class="tm" data-tm>'+mmss(rem)+'</span><span class="mid"><span>из '+mmss(timer.total)+'</span><span class="trk"><i data-fill style="width:'+Math.max(0,Math.min(100,rem/timer.total*100))+'%"></i></span></span><button data-act="rplus" aria-label="Добавить 30 секунд">+30 с</button><button data-act="rstop">Стоп</button>';
@@ -731,7 +771,7 @@ function audioPrime(){try{if(!actx){var A=window.AudioContext||window.webkitAudi
 function beep(){try{if(!actx)return;var t=actx.currentTime;[0,.28,.56].forEach(function(d,i){var o=actx.createOscillator(),g=actx.createGain();o.type="sine";o.frequency.value=i===2?1175:880;g.gain.setValueAtTime(.0001,t+d);g.gain.exponentialRampToValueAtTime(.4,t+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d+.22);o.connect(g);g.connect(actx.destination);o.start(t+d);o.stop(t+d+.24)})}catch(e){}}
 var wl=null;function wakeOn(){try{if(navigator.wakeLock&&!wl)navigator.wakeLock.request("screen").then(function(x){wl=x;x.addEventListener("release",function(){wl=null})}).catch(function(){})}catch(e){}}
 function wakeOff(){try{if(wl){wl.release();wl=null}}catch(e){}}
-function startRest(e){audioPrime();timer={id:e.id,d:cfg.cur.d,name:e.name,end:Date.now()+restSecs(e)*1000,total:restSecs(e),fired:false};saveTimer();wakeOn();refreshTimer(true)}
+function startRest(e){if(e.ss){toast("Суперсет: сразу следующее упражнение");return}audioPrime();timer={id:e.id,d:cfg.cur.d,name:e.name,end:Date.now()+restSecs(e)*1000,total:restSecs(e),fired:false};saveTimer();wakeOn();refreshTimer(true)}
 function finishRest(){
   timer.fired=true;saveTimer();beep();
   try{if(navigator.vibrate)navigator.vibrate([350,150,350,150,350])}catch(e){}
